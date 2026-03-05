@@ -1,0 +1,13 @@
+{
+  "name": "mojo-addon-examples",
+  "version": "0.1.0",
+  "private": true,
+  "description": "High-performance Node.js addon examples built with Mojo + napi-mojo",
+  "scripts": {
+    "build:matmul": "bash matmul/build.sh",
+    "demo:matmul": "node matmul/matmul.js"
+  },
+  "dependencies": {
+    "napi-mojo": "file:../mojo-node-api"
+  }
+}
