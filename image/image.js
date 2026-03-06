@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // image/image.js — Correctness tests + benchmarks for image processing addon
 
 const addon = require('./build/image.node');

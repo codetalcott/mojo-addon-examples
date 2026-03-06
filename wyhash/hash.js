@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // wyhash/hash.js — Correctness tests + benchmarks for wyhash addon
 
 const addon = require('./build/wyhash.node');

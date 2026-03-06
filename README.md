@@ -101,11 +101,7 @@ npm install
 pixi install
 
 # Build all examples
-npm run build:matmul
-npm run build:search
-npm run build:stats
-npm run build:image
-npm run build:hash
+npm run build:all
 
 # Run benchmarks
 node matmul/matmul.js

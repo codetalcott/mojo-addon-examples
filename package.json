@@ -13,6 +13,7 @@
     "build:image": "bash image/build.sh",
     "demo:image": "node image/image.js",
     "build:hash": "bash wyhash/build.sh",
+    "build:all": "npm run build:matmul && npm run build:search && npm run build:stats && npm run build:image && npm run build:hash",
     "demo:hash": "node wyhash/hash.js"
   },
   "dependencies": {

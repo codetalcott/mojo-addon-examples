@@ -1,0 +1,46 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: prefix-dev/setup-pixi@v0.8.8
+        with:
+          pixi-version: latest
+
+      - run: npm install
+      - run: pixi install
+
+      - name: Build all examples
+        run: pixi run bash -c "npm run build:all"
+
+      - name: Run matmul demo
+        run: node matmul/matmul.js
+
+      - name: Run simd-search demo
+        run: node simd-search/search.js
+
+      - name: Run stats demo
+        run: node stats/stats.js
+
+      - name: Run image demo
+        run: node image/image.js
+
+      - name: Run wyhash demo
+        run: node wyhash/hash.js
