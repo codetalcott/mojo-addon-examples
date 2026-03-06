@@ -71,7 +71,22 @@ node image/image.js
 | threshold | 5.5x | 5.2x | **6.5x** | Grayscale + compare, `parallelize()` |
 | **blur(r=5)** | 6.8x | **10.1x** | 5.6x | Separable box blur, parallel rows + cols |
 
-See [ROADMAP.md](ROADMAP.md) for planned examples.
+### wyhash — Fast Non-Cryptographic Hash
+
+Match C hash performance in ~50 lines of Mojo. `wyHash` returns BigInt (full 64-bit), `wyHash64` returns Number (lossy but no BigInt allocation overhead). The speed comes from 128-bit folded multiplies via Mojo's native `DType.uint128`.
+
+```
+node wyhash/hash.js
+```
+
+**Results (M4 Mac, Buffer):**
+
+| Function | 1KB | 64KB | 1MB | 16MB | Mojo Feature |
+|----------|-----|------|-----|------|-------------|
+| **wyHash** (BigInt) | 3.7x | **52.9x** | **65.9x** | **66.2x** | 128-bit folded multiply |
+| wyHash64 (Number) | 2.9x | 45.5x | 57.8x | 58.7x | Same kernel, Number return |
+
+See [ROADMAP.md](ROADMAP.md) for the full project roadmap.
 
 ## Prerequisites
 
@@ -90,10 +105,12 @@ npm run build:matmul
 npm run build:search
 npm run build:stats
 npm run build:image
+npm run build:hash
 
 # Run benchmarks
 node matmul/matmul.js
 node simd-search/search.js
 node stats/stats.js
 node image/image.js
+node wyhash/hash.js
 ```

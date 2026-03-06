@@ -11,7 +11,9 @@
     "build:stats": "bash stats/build.sh",
     "demo:stats": "node stats/stats.js",
     "build:image": "bash image/build.sh",
-    "demo:image": "node image/image.js"
+    "demo:image": "node image/image.js",
+    "build:hash": "bash wyhash/build.sh",
+    "demo:hash": "node wyhash/hash.js"
   },
   "dependencies": {
     "napi-mojo": "file:../mojo-node-api"

@@ -62,18 +62,25 @@ Four RGBA pixel operations: grayscale, brightness, threshold, separable box blur
 | threshold | 5.5x | 5.2x | **6.5x** | Grayscale + compare + parallelize |
 | **blur(r=5)** | 6.8x | **10.1x** | 5.6x | Separable box blur, parallel rows + cols |
 
+### wyhash (Fast Non-Cryptographic Hash)
+**Location:** `wyhash/`
+
+Match C hash performance in ~50 lines of Mojo. 128-bit folded multiply via native `DType.uint128`.
+
+| Function | 1KB | 64KB | 1MB | 16MB | Technique |
+|----------|-----|------|-----|------|-----------|
+| **wyHash** (BigInt) | 3.7x | **52.9x** | **65.9x** | **66.2x** | 128-bit folded multiply |
+| wyHash64 (Number) | 2.9x | 45.5x | 57.8x | 58.7x | Same kernel, Number return |
+
 ---
 
 ## Planned — Niche / Higher Effort
 
-### 5. Audio DSP (FFT + Convolution)
+### Audio DSP (FFT + Convolution)
 **Effort:** 5-8 days | Radix-2 FFT butterfly ops map perfectly to SIMD multiply-add. Visual demo with waveform-to-spectrum conversion.
 
-### 6. Distance Metrics (Hamming + Levenshtein)
+### Distance Metrics (Hamming + Levenshtein)
 **Effort:** 5-8 days | Myers' bit-vector Levenshtein processes 64 characters per op. Useful for fuzzy search and deduplication.
-
-### 7. SIMD Hash (wyhash)
-**Effort:** 3-5 days | Developer experience story — match C performance in 50 lines of Mojo. First native wyhash addon for Node.js.
 
 ---
 
