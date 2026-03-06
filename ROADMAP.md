@@ -50,26 +50,21 @@ Compute `{mean, stddev, min, max, p50, p95, p99}` on a Float64Array in a single 
 | **stats()** | **5.8x** | **6.7x** | SIMD reduce_add/min/max + parallelize |
 | histogram() | 3.9x | 4.0x | SIMD min/max range detection |
 
----
+### Image Processing (Pixel Operations)
+**Location:** `image/`
 
-## Planned — High Impact, Moderate Effort
+Four RGBA pixel operations: grayscale, brightness, threshold, separable box blur. All parallelized across rows/columns.
 
-### 4. Image Processing (Pixel Operations)
-**Status:** Planned
-**Effort:** 2-3 days | **Expected speedup:** 3-10x on pixel ops
-
-SIMD + parallel pixel processing on raw RGBA buffers. Decode/encode via sharp (JS), pixel math in Mojo.
-
-- `grayscale(rgba, width, height)` — SIMD weighted channel reduction
-- `blur(rgba, width, height, radius)` — separable box blur, parallel across rows
-- `brightness(rgba, width, height, factor)` — trivially SIMD-parallel
-- `threshold(rgba, width, height, value)` — SIMD comparison
-
-Visual before/after demo on 4K images.
+| Function | 720p | 1080p | 4K | Technique |
+|----------|------|-------|-----|-----------|
+| grayscale | 6.8x | 5.4x | **6.8x** | Integer `(77R+150G+29B)>>8` + parallelize |
+| brightness | 4.7x | 5.1x | 5.0x | Fixed-point multiply + clamp + parallelize |
+| threshold | 5.5x | 5.2x | **6.5x** | Grayscale + compare + parallelize |
+| **blur(r=5)** | 6.8x | **10.1x** | 5.6x | Separable box blur, parallel rows + cols |
 
 ---
 
-## Tier 3 — Niche / Higher Effort
+## Planned — Niche / Higher Effort
 
 ### 5. Audio DSP (FFT + Convolution)
 **Effort:** 5-8 days | Radix-2 FFT butterfly ops map perfectly to SIMD multiply-add. Visual demo with waveform-to-spectrum conversion.

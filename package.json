@@ -9,7 +9,9 @@
     "build:search": "bash simd-search/build.sh",
     "demo:search": "node simd-search/search.js",
     "build:stats": "bash stats/build.sh",
-    "demo:stats": "node stats/stats.js"
+    "demo:stats": "node stats/stats.js",
+    "build:image": "bash image/build.sh",
+    "demo:image": "node image/image.js"
   },
   "dependencies": {
     "napi-mojo": "file:../mojo-node-api"

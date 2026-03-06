@@ -54,6 +54,23 @@ node stats/stats.js
 | **stats()** | **4.2x** | **5.8x** | **6.7x** | SIMD reduce_add/min/max, `parallelize()` |
 | histogram() | 3.7x | 3.9x | 4.0x | SIMD min/max range detection |
 
+### Image Processing — Pixel Operations
+
+Four RGBA pixel operations on Uint8Arrays: `grayscale`, `brightness`, `threshold`, `blur`. Integer-approximation grayscale, fixed-point brightness, separable box blur with parallel horizontal + vertical passes.
+
+```
+node image/image.js
+```
+
+**Results (M4 Mac, RGBA Uint8Array):**
+
+| Function | 720p | 1080p | 4K | Mojo Feature |
+|----------|------|-------|-----|-------------|
+| grayscale | 6.8x | 5.4x | **6.8x** | Integer `(77R+150G+29B)>>8`, `parallelize()` |
+| brightness | 4.7x | 5.1x | 5.0x | Fixed-point multiply + clamp, `parallelize()` |
+| threshold | 5.5x | 5.2x | **6.5x** | Grayscale + compare, `parallelize()` |
+| **blur(r=5)** | 6.8x | **10.1x** | 5.6x | Separable box blur, parallel rows + cols |
+
 See [ROADMAP.md](ROADMAP.md) for planned examples.
 
 ## Prerequisites
@@ -72,9 +89,11 @@ pixi install
 npm run build:matmul
 npm run build:search
 npm run build:stats
+npm run build:image
 
 # Run benchmarks
 node matmul/matmul.js
 node simd-search/search.js
 node stats/stats.js
+node image/image.js
 ```
