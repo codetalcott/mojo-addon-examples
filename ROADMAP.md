@@ -16,48 +16,43 @@ Dot product, cosine similarity, euclidean distance on Float64Arrays. SIMD + para
 
 ---
 
-## Tier 1 — High Impact, Low Effort
-
-### 1. Matrix Multiply (Progressive Optimization)
-**Status:** In progress
-**Effort:** 1-2 days | **Expected speedup:** 50-100x over JS
+### Matrix Multiply (Progressive Optimization)
+**Location:** `matmul/`
 
 The canonical Mojo performance demo. Four exported functions showing progressive optimization:
 
-| Step | Function | Mojo Feature | Expected Gain |
-|------|----------|-------------|---------------|
-| 1 | `matmulNaive` | Triple loop baseline | 1x |
-| 2 | `matmulVectorized` | `vectorize()` inner loop | 2-4x |
-| 3 | `matmulTiled` | Cache-friendly blocking | 10-20x |
-| 4 | `matmulParallel` | `parallelize()` across tile rows | 30-100x |
+| Step | 1024x1024 | 2048x2048 | Mojo Feature |
+|------|-----------|-----------|-------------|
+| JS baseline | 1x | 1x | — |
+| Mojo naive | 2.2x | 1.9x | Same algorithm, better compiler |
+| Mojo vectorized | 15.5x | 32.0x | `vectorize()` — SIMD inner loop |
+| Mojo tiled | 12.6x | 27.6x | Cache-friendly 64x64 blocking |
+| **Mojo parallel** | **38.6x** | **91.4x** | `parallelize()` — multi-core |
 
-Benchmark at 128, 256, 512, 1024, 2048 dimensions. Each step maps to exactly one language feature. The most effective demo for explaining *why Mojo exists*.
+### SIMD Text Search
+**Location:** `simd-search/`
 
-### 2. SIMD Text Search
-**Status:** Planned
-**Effort:** 1-2 days | **Expected speedup:** 5-15x
+Byte-level SIMD pattern matching — impossible in pure JavaScript. XOR-based SIMD byte matching with `parallelize()` for large buffers.
 
-Byte-level SIMD pattern matching — impossible in pure JavaScript. Operations:
+| Function | 1MB | 100MB | Technique |
+|----------|-----|-------|-----------|
+| **countByte** | **19.2x** | **67.6x** | SIMD XOR + reduce + parallelize |
+| countLines | 18.5x | 65.3x | Same kernel, byte=0x0A |
+| searchAll | 2.5x | 3.1x | Two-pass: SIMD count + collect |
 
-- `countByte(buffer, byte)` — SIMD `cmp_eq` + `reduce_add` (simdjson technique)
-- `countLines(buffer)` — count newlines at SIMD speed
-- `searchAll(buffer, needle)` — return Uint32Array of all match positions
+### Statistics / Aggregation
+**Location:** `stats/`
 
-Processes 16 bytes/cycle (ARM NEON) or 32 bytes/cycle (AVX2). Guaranteed massive speedup on 1MB+ buffers. Zero UTF-8 complications (byte-level search is safe for ASCII patterns in UTF-8).
+Compute `{mean, stddev, min, max, p50, p95, p99}` on a Float64Array in a single N-API call. SIMD reductions + parallel accumulation + quickselect percentiles.
+
+| Function | 1M | 10M | Technique |
+|----------|-----|-----|-----------|
+| **stats()** | **5.8x** | **6.7x** | SIMD reduce_add/min/max + parallelize |
+| histogram() | 3.9x | 4.0x | SIMD min/max range detection |
 
 ---
 
-## Tier 2 — High Impact, Moderate Effort
-
-### 3. Statistics / Aggregation
-**Status:** Planned
-**Effort:** 2-3 days | **Expected speedup:** 10x
-
-Compute `{mean, stddev, min, max, p50, p95, p99}` on a Float64Array in a single N-API call. SIMD reductions + parallel accumulation. The most *practical* example — every monitoring, observability, and analytics pipeline needs this.
-
-- `stats(data)` — full stats object in one pass
-- `histogram(data, bins)` — SIMD-accelerated binning
-- `topK(data, k)` — partial sort via quickselect
+## Planned — High Impact, Moderate Effort
 
 ### 4. Image Processing (Pixel Operations)
 **Status:** Planned

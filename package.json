@@ -5,7 +5,11 @@
   "description": "High-performance Node.js addon examples built with Mojo + napi-mojo",
   "scripts": {
     "build:matmul": "bash matmul/build.sh",
-    "demo:matmul": "node matmul/matmul.js"
+    "demo:matmul": "node matmul/matmul.js",
+    "build:search": "bash simd-search/build.sh",
+    "demo:search": "node simd-search/search.js",
+    "build:stats": "bash stats/build.sh",
+    "demo:stats": "node stats/stats.js"
   },
   "dependencies": {
     "napi-mojo": "file:../mojo-node-api"
