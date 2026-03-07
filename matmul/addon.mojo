@@ -15,7 +15,6 @@
 from algorithm.functional import vectorize, parallelize
 from sys import simd_width_of
 from memory import alloc
-from ffi import OwnedDLHandle
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error
@@ -24,16 +23,7 @@ from napi.framework.js_int32 import JsInt32
 from napi.framework.js_typedarray import JsTypedArray
 from napi.framework.args import CbArgs
 from napi.framework.register import fn_ptr, ModuleBuilder
-
-
-# --- Mojo async runtime init -------------------------------------------------
-
-fn _init_mojo_async_runtime() raises:
-    var lib = OwnedDLHandle()
-    var create_rt = lib.get_function[
-        fn () -> OpaquePointer[MutAnyOrigin]
-    ]("KGEN_CompilerRT_AsyncRT_CreateRuntime")
-    _ = create_rt()
+from napi.framework.runtime import init_async_runtime
 
 
 # --- Helper: extract matmul args from JS -------------------------------------
@@ -241,7 +231,7 @@ fn matmul_parallel_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 @export("napi_register_module_v1", ABI="C")
 fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
-        _init_mojo_async_runtime()
+        init_async_runtime()
     except:
         pass
 

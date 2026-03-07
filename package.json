@@ -14,7 +14,8 @@
     "demo:image": "node image/image.js",
     "build:hash": "bash wyhash/build.sh",
     "build:all": "npm run build:matmul && npm run build:search && npm run build:stats && npm run build:image && npm run build:hash",
-    "demo:hash": "node wyhash/hash.js"
+    "demo:hash": "node wyhash/hash.js",
+    "test": "node matmul/test.js && node simd-search/test.js && node stats/test.js && node image/test.js && node wyhash/test.js"
   },
   "dependencies": {
     "napi-mojo": "file:../mojo-node-api"

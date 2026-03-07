@@ -11,7 +11,6 @@
 from algorithm.functional import vectorize, parallelize
 from sys import simd_width_of
 from memory import alloc
-from ffi import OwnedDLHandle
 
 from napi.types import NapiEnv, NapiValue, NapiStatus, NAPI_UINT32_ARRAY
 from napi.error import throw_js_error, check_status
@@ -22,17 +21,8 @@ from napi.framework.js_typedarray import JsTypedArray
 from napi.framework.js_arraybuffer import JsArrayBuffer
 from napi.framework.args import CbArgs
 from napi.framework.register import fn_ptr, ModuleBuilder
+from napi.framework.runtime import init_async_runtime
 from napi.raw import raw_create_typedarray
-
-
-# --- Mojo async runtime init -------------------------------------------------
-
-fn _init_mojo_async_runtime() raises:
-    var lib = OwnedDLHandle()
-    var create_rt = lib.get_function[
-        fn () -> OpaquePointer[MutAnyOrigin]
-    ]("KGEN_CompilerRT_AsyncRT_CreateRuntime")
-    _ = create_rt()
 
 
 # --- Helper: get byte pointer + length from Buffer or Uint8Array -------------
@@ -290,7 +280,7 @@ fn search_all_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 @export("napi_register_module_v1", ABI="C")
 fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
-        _init_mojo_async_runtime()
+        init_async_runtime()
     except:
         pass
 
