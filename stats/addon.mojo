@@ -14,6 +14,7 @@ from memory import alloc
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error
+from napi.bindings import NapiBindings, Bindings, init_bindings
 from napi.framework.js_number import JsNumber
 from napi.framework.js_int32 import JsInt32
 from napi.framework.js_object import JsObject
@@ -196,26 +197,27 @@ fn _compute_stats(
 
 fn stats_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
-        var arg = CbArgs.get_one(env, info)
-        if not JsTypedArray.is_typedarray(env, arg):
+        var r = CbArgs.get_bindings_and_one(env, info)
+        var b = r.b
+        if not JsTypedArray.is_typedarray(b, env, r.arg0):
             throw_js_error(env, "stats requires a Float64Array argument")
             return NapiValue()
-        var ta = JsTypedArray(arg)
-        var size = Int(ta.length(env))
+        var ta = JsTypedArray(r.arg0)
+        var size = Int(ta.length(b, env))
         if size == 0:
             throw_js_error(env, "stats requires non-empty array")
             return NapiValue()
-        var ptr = ta.data_ptr(env).bitcast[Float64]()
+        var ptr = ta.data_ptr(b, env).bitcast[Float64]()
         var s = _compute_stats(ptr, size)
 
-        var obj = JsObject.create(env)
-        obj.set_property(env, "mean", JsNumber.create(env, s[0]).value)
-        obj.set_property(env, "stddev", JsNumber.create(env, s[1]).value)
-        obj.set_property(env, "min", JsNumber.create(env, s[2]).value)
-        obj.set_property(env, "max", JsNumber.create(env, s[3]).value)
-        obj.set_property(env, "p50", JsNumber.create(env, s[4]).value)
-        obj.set_property(env, "p95", JsNumber.create(env, s[5]).value)
-        obj.set_property(env, "p99", JsNumber.create(env, s[6]).value)
+        var obj = JsObject.create(b, env)
+        obj.set_property(b, env, "mean",   JsNumber.create(b, env, s[0]).value)
+        obj.set_property(b, env, "stddev", JsNumber.create(b, env, s[1]).value)
+        obj.set_property(b, env, "min",    JsNumber.create(b, env, s[2]).value)
+        obj.set_property(b, env, "max",    JsNumber.create(b, env, s[3]).value)
+        obj.set_property(b, env, "p50",    JsNumber.create(b, env, s[4]).value)
+        obj.set_property(b, env, "p95",    JsNumber.create(b, env, s[5]).value)
+        obj.set_property(b, env, "p99",    JsNumber.create(b, env, s[6]).value)
         return obj.value
     except:
         throw_js_error(env, "stats failed")
@@ -224,17 +226,18 @@ fn stats_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 fn histogram_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
-        var args = CbArgs.get_two(env, info)
-        if not JsTypedArray.is_typedarray(env, args[0]):
+        var r = CbArgs.get_bindings_and_two(env, info)
+        var b = r.b
+        if not JsTypedArray.is_typedarray(b, env, r.arg0):
             throw_js_error(env, "histogram requires a Float64Array and bin count")
             return NapiValue()
-        var ta = JsTypedArray(args[0])
-        var size = Int(ta.length(env))
-        var bins = Int(JsInt32.from_napi_value(env, args[1]))
+        var ta = JsTypedArray(r.arg0)
+        var size = Int(ta.length(b, env))
+        var bins = Int(JsInt32.from_napi_value(b, env, r.arg1))
         if size == 0 or bins <= 0:
             throw_js_error(env, "histogram requires non-empty array and positive bins")
             return NapiValue()
-        var ptr = ta.data_ptr(env).bitcast[Float64]()
+        var ptr = ta.data_ptr(b, env).bitcast[Float64]()
 
         # Find min/max via SIMD
         var smm = _parallel_sum_min_max(ptr, size)
@@ -256,12 +259,12 @@ fn histogram_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
                 counts[idx] += 1.0
 
         # Create Float64Array result
-        var ab = JsArrayBuffer.create(env, UInt(bins * 8))
-        var ab_ptr = ab.data_ptr(env).bitcast[Float64]()
+        var ab = JsArrayBuffer.create(b, env, UInt(bins * 8))
+        var ab_ptr = ab.data_ptr(b, env).bitcast[Float64]()
         for i in range(bins):
             ab_ptr[i] = counts[i]
         counts.free()
-        var result_ta = JsTypedArray.create_float64(env, ab.value, 0, UInt(bins))
+        var result_ta = JsTypedArray.create_float64(b, env, ab.value, 0, UInt(bins))
         return result_ta.value
     except:
         throw_js_error(env, "histogram failed")
@@ -277,13 +280,24 @@ fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     except:
         pass
 
+    var bindings_ptr = alloc[NapiBindings](1)
+    try:
+        var bindings = NapiBindings()
+        init_bindings(bindings)
+        bindings_ptr.init_pointee_move(bindings^)
+    except:
+        bindings_ptr.free()
+        return exports
+    var cb_data = bindings_ptr.bitcast[NoneType]()
+
     var stats_ref = stats_fn
     var hist_ref = histogram_fn
 
     try:
-        var m = ModuleBuilder(env, exports)
+        var m = ModuleBuilder(env, exports, cb_data)
         m.method("stats", fn_ptr(stats_ref))
         m.method("histogram", fn_ptr(hist_ref))
+        m.flush()
     except:
         pass
 

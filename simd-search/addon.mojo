@@ -12,8 +12,9 @@ from algorithm.functional import vectorize, parallelize
 from sys import simd_width_of
 from memory import alloc
 
-from napi.types import NapiEnv, NapiValue, NapiStatus, NAPI_UINT32_ARRAY
-from napi.error import throw_js_error, check_status
+from napi.types import NapiEnv, NapiValue
+from napi.error import throw_js_error
+from napi.bindings import NapiBindings, Bindings, init_bindings
 from napi.framework.js_number import JsNumber
 from napi.framework.js_int32 import JsInt32
 from napi.framework.js_buffer import JsBuffer
@@ -22,23 +23,22 @@ from napi.framework.js_arraybuffer import JsArrayBuffer
 from napi.framework.args import CbArgs
 from napi.framework.register import fn_ptr, ModuleBuilder
 from napi.framework.runtime import init_async_runtime
-from napi.raw import raw_create_typedarray
 
 
 # --- Helper: get byte pointer + length from Buffer or Uint8Array -------------
 
-fn _get_data_ptr(env: NapiEnv, val: NapiValue) raises -> UnsafePointer[Byte, MutAnyOrigin]:
-    if JsBuffer.is_buffer(env, val):
-        return JsBuffer(val).data_ptr(env)
-    if JsTypedArray.is_typedarray(env, val):
-        return JsTypedArray(val).data_ptr(env)
+fn _get_data_ptr(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UnsafePointer[Byte, MutAnyOrigin]:
+    if JsBuffer.is_buffer(b, env, val):
+        return JsBuffer(val).data_ptr(b, env)
+    if JsTypedArray.is_typedarray(b, env, val):
+        return JsTypedArray(val).data_ptr(b, env)
     raise Error("expected Buffer or Uint8Array")
 
-fn _get_data_len(env: NapiEnv, val: NapiValue) raises -> Int:
-    if JsBuffer.is_buffer(env, val):
-        return Int(JsBuffer(val).length(env))
-    if JsTypedArray.is_typedarray(env, val):
-        return Int(JsTypedArray(val).length(env))
+fn _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
+    if JsBuffer.is_buffer(b, env, val):
+        return Int(JsBuffer(val).length(b, env))
+    if JsTypedArray.is_typedarray(b, env, val):
+        return Int(JsTypedArray(val).length(b, env))
     raise Error("expected Buffer or Uint8Array")
 
 
@@ -218,12 +218,13 @@ fn _collect_multi_byte(
 
 fn count_byte_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
-        var args = CbArgs.get_two(env, info)
-        var ptr = _get_data_ptr(env, args[0])
-        var size = _get_data_len(env, args[0])
-        var target = Byte(JsInt32.from_napi_value(env, args[1]))
+        var r = CbArgs.get_bindings_and_two(env, info)
+        var b = r.b
+        var ptr = _get_data_ptr(b, env, r.arg0)
+        var size = _get_data_len(b, env, r.arg0)
+        var target = Byte(JsInt32.from_napi_value(b, env, r.arg1))
         var count = _count_byte(ptr, target, size)
-        return JsNumber.create(env, Float64(count)).value
+        return JsNumber.create(b, env, Float64(count)).value
     except:
         throw_js_error(env, "countByte failed")
         return NapiValue()
@@ -231,11 +232,12 @@ fn count_byte_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 fn count_lines_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
-        var arg = CbArgs.get_one(env, info)
-        var ptr = _get_data_ptr(env, arg)
-        var size = _get_data_len(env, arg)
+        var r = CbArgs.get_bindings_and_one(env, info)
+        var b = r.b
+        var ptr = _get_data_ptr(b, env, r.arg0)
+        var size = _get_data_len(b, env, r.arg0)
         var count = _count_byte(ptr, Byte(0x0A), size)
-        return JsNumber.create(env, Float64(count)).value
+        return JsNumber.create(b, env, Float64(count)).value
     except:
         throw_js_error(env, "countLines failed")
         return NapiValue()
@@ -243,11 +245,12 @@ fn count_lines_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 fn search_all_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
-        var args = CbArgs.get_two(env, info)
-        var h_ptr = _get_data_ptr(env, args[0])
-        var h_len = _get_data_len(env, args[0])
-        var n_ptr = _get_data_ptr(env, args[1])
-        var n_len = _get_data_len(env, args[1])
+        var r = CbArgs.get_bindings_and_two(env, info)
+        var b = r.b
+        var h_ptr = _get_data_ptr(b, env, r.arg0)
+        var h_len = _get_data_len(b, env, r.arg0)
+        var n_ptr = _get_data_ptr(b, env, r.arg1)
+        var n_len = _get_data_len(b, env, r.arg1)
 
         # Count matches first to allocate exact-size result
         var match_count: Int
@@ -258,18 +261,15 @@ fn search_all_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
         # Create result Uint32Array
         var byte_len = UInt(match_count * 4) if match_count > 0 else UInt(0)
-        var ab = JsArrayBuffer.create(env, byte_len)
+        var ab = JsArrayBuffer.create(b, env, byte_len)
         if match_count > 0:
-            var ab_ptr = ab.data_ptr(env).bitcast[UInt32]()
+            var ab_ptr = ab.data_ptr(b, env).bitcast[UInt32]()
             if n_len == 1:
                 _ = _collect_byte_positions(h_ptr, n_ptr[0], h_len, ab_ptr)
             else:
                 _ = _collect_multi_byte(h_ptr, n_ptr, h_len, n_len, ab_ptr)
 
-        var result = NapiValue()
-        check_status(raw_create_typedarray(env, NAPI_UINT32_ARRAY, UInt(match_count),
-            ab.value, 0, UnsafePointer(to=result).bitcast[NoneType]()))
-        return result
+        return JsTypedArray.create_uint32(b, env, ab.value, 0, UInt(match_count)).value
     except:
         throw_js_error(env, "searchAll failed")
         return NapiValue()
@@ -284,15 +284,26 @@ fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     except:
         pass
 
+    var bindings_ptr = alloc[NapiBindings](1)
+    try:
+        var bindings = NapiBindings()
+        init_bindings(bindings)
+        bindings_ptr.init_pointee_move(bindings^)
+    except:
+        bindings_ptr.free()
+        return exports
+    var cb_data = bindings_ptr.bitcast[NoneType]()
+
     var cb_ref = count_byte_fn
     var cl_ref = count_lines_fn
     var sa_ref = search_all_fn
 
     try:
-        var m = ModuleBuilder(env, exports)
+        var m = ModuleBuilder(env, exports, cb_data)
         m.method("countByte", fn_ptr(cb_ref))
         m.method("countLines", fn_ptr(cl_ref))
         m.method("searchAll", fn_ptr(sa_ref))
+        m.flush()
     except:
         pass
 

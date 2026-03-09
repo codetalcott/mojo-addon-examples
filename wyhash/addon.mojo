@@ -7,10 +7,11 @@
 ## Build:  pixi run bash wyhash/build.sh
 ## Run:    node wyhash/hash.js
 
-from memory import bitcast
+from memory import bitcast, alloc
 
 from napi.types import NapiEnv, NapiValue, NAPI_TYPE_NUMBER, NAPI_TYPE_BIGINT
 from napi.error import throw_js_error
+from napi.bindings import NapiBindings, Bindings, init_bindings
 from napi.framework.js_number import JsNumber
 from napi.framework.js_bigint import JsBigInt
 from napi.framework.js_buffer import JsBuffer
@@ -102,29 +103,29 @@ fn wyhash(data: UnsafePointer[Byte, MutAnyOrigin], length: Int, in_seed: UInt64)
 
 # --- Helper: get byte pointer + length from Buffer or Uint8Array -------------
 
-fn _get_data_ptr(env: NapiEnv, val: NapiValue) raises -> UnsafePointer[Byte, MutAnyOrigin]:
-    if JsBuffer.is_buffer(env, val):
-        return JsBuffer(val).data_ptr(env)
-    if JsTypedArray.is_typedarray(env, val):
-        return JsTypedArray(val).data_ptr(env)
+fn _get_data_ptr(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UnsafePointer[Byte, MutAnyOrigin]:
+    if JsBuffer.is_buffer(b, env, val):
+        return JsBuffer(val).data_ptr(b, env)
+    if JsTypedArray.is_typedarray(b, env, val):
+        return JsTypedArray(val).data_ptr(b, env)
     raise Error("expected Buffer or Uint8Array")
 
-fn _get_data_len(env: NapiEnv, val: NapiValue) raises -> Int:
-    if JsBuffer.is_buffer(env, val):
-        return Int(JsBuffer(val).length(env))
-    if JsTypedArray.is_typedarray(env, val):
-        return Int(JsTypedArray(val).length(env))
+fn _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
+    if JsBuffer.is_buffer(b, env, val):
+        return Int(JsBuffer(val).length(b, env))
+    if JsTypedArray.is_typedarray(b, env, val):
+        return Int(JsTypedArray(val).length(b, env))
     raise Error("expected Buffer or Uint8Array")
 
 
 # --- Read seed argument (Number or BigInt, default 0) -------------------------
 
-fn _read_seed(env: NapiEnv, val: NapiValue) raises -> UInt64:
-    var t = js_typeof(env, val)
+fn _read_seed(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UInt64:
+    var t = js_typeof(b, env, val)
     if t == NAPI_TYPE_NUMBER:
-        return UInt64(Int64(JsNumber.from_napi_value(env, val)))
+        return UInt64(Int64(JsNumber.from_napi_value(b, env, val)))
     if t == NAPI_TYPE_BIGINT:
-        return JsBigInt.to_uint64(env, val)
+        return JsBigInt.to_uint64(b, env, val)
     return UInt64(0)
 
 
@@ -133,16 +134,17 @@ fn _read_seed(env: NapiEnv, val: NapiValue) raises -> UInt64:
 fn wy_hash_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     """wyHash(buf, seed?) → BigInt"""
     try:
-        var argc = CbArgs.argc(env, info)
-        var arg0 = CbArgs.get_one(env, info)
-        var ptr = _get_data_ptr(env, arg0)
-        var length = _get_data_len(env, arg0)
+        var bindings = CbArgs.get_bindings(env, info)
+        var argc = CbArgs.argc(bindings, env, info)
+        var arg0 = CbArgs.get_one(bindings, env, info)
+        var ptr = _get_data_ptr(bindings, env, arg0)
+        var length = _get_data_len(bindings, env, arg0)
         var seed = UInt64(0)
         if argc >= 2:
-            var args = CbArgs.get_two(env, info)
-            seed = _read_seed(env, args[1])
+            var args = CbArgs.get_two(bindings, env, info)
+            seed = _read_seed(bindings, env, args[1])
         var result = wyhash(ptr, length, seed)
-        return JsBigInt.from_uint64(env, result).value
+        return JsBigInt.from_uint64(bindings, env, result).value
     except:
         throw_js_error(env, "wyHash failed")
         return NapiValue()
@@ -151,16 +153,17 @@ fn wy_hash_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 fn wy_hash64_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     """wyHash64(buf, seed?) → Number (lossy Float64)"""
     try:
-        var argc = CbArgs.argc(env, info)
-        var arg0 = CbArgs.get_one(env, info)
-        var ptr = _get_data_ptr(env, arg0)
-        var length = _get_data_len(env, arg0)
+        var bindings = CbArgs.get_bindings(env, info)
+        var argc = CbArgs.argc(bindings, env, info)
+        var arg0 = CbArgs.get_one(bindings, env, info)
+        var ptr = _get_data_ptr(bindings, env, arg0)
+        var length = _get_data_len(bindings, env, arg0)
         var seed = UInt64(0)
         if argc >= 2:
-            var args = CbArgs.get_two(env, info)
-            seed = _read_seed(env, args[1])
+            var args = CbArgs.get_two(bindings, env, info)
+            seed = _read_seed(bindings, env, args[1])
         var result = wyhash(ptr, length, seed)
-        return JsNumber.create(env, Float64(result)).value
+        return JsNumber.create(bindings, env, Float64(result)).value
     except:
         throw_js_error(env, "wyHash64 failed")
         return NapiValue()
@@ -170,13 +173,24 @@ fn wy_hash64_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 @export("napi_register_module_v1", ABI="C")
 fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+    var bindings_ptr = alloc[NapiBindings](1)
+    try:
+        var bindings = NapiBindings()
+        init_bindings(bindings)
+        bindings_ptr.init_pointee_move(bindings^)
+    except:
+        bindings_ptr.free()
+        return exports
+    var cb_data = bindings_ptr.bitcast[NoneType]()
+
     var wh_ref = wy_hash_fn
     var wh64_ref = wy_hash64_fn
 
     try:
-        var m = ModuleBuilder(env, exports)
+        var m = ModuleBuilder(env, exports, cb_data)
         m.method("wyHash", fn_ptr(wh_ref))
         m.method("wyHash64", fn_ptr(wh64_ref))
+        m.flush()
     except:
         pass
 

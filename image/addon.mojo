@@ -14,6 +14,7 @@ from memory import alloc
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error
+from napi.bindings import NapiBindings, Bindings, init_bindings
 from napi.framework.js_number import JsNumber
 from napi.framework.js_int32 import JsInt32
 from napi.framework.js_typedarray import JsTypedArray
@@ -241,18 +242,17 @@ fn _blur_parallel(
 
 fn grayscale_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
-        var args = alloc[NapiValue](3)
-        CbArgs.get_argv(env, info, 3, args)
+        var bindings = CbArgs.get_bindings(env, info)
+        var args = CbArgs.get_three(bindings, env, info)
         var ta = JsTypedArray(args[0])
-        var width = Int(JsInt32.from_napi_value(env, args[1]))
-        var height = Int(JsInt32.from_napi_value(env, args[2]))
-        args.free()
+        var width = Int(JsInt32.from_napi_value(bindings, env, args[1]))
+        var height = Int(JsInt32.from_napi_value(bindings, env, args[2]))
         var num_bytes = width * height * 4
-        var src_ptr = ta.data_ptr(env)
-        var ab = JsArrayBuffer.create(env, UInt(num_bytes))
-        var dst_ptr = ab.data_ptr(env)
+        var src_ptr = ta.data_ptr(bindings, env)
+        var ab = JsArrayBuffer.create(bindings, env, UInt(num_bytes))
+        var dst_ptr = ab.data_ptr(bindings, env)
         _grayscale_parallel(src_ptr, dst_ptr, width, height)
-        var result_ta = JsTypedArray.create_uint8(env, ab.value, 0, UInt(num_bytes))
+        var result_ta = JsTypedArray.create_uint8(bindings, env, ab.value, 0, UInt(num_bytes))
         return result_ta.value
     except:
         throw_js_error(env, "grayscale failed")
@@ -261,20 +261,19 @@ fn grayscale_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 fn brightness_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
-        var args = alloc[NapiValue](4)
-        CbArgs.get_argv(env, info, 4, args)
+        var bindings = CbArgs.get_bindings(env, info)
+        var args = CbArgs.get_four(bindings, env, info)
         var ta = JsTypedArray(args[0])
-        var width = Int(JsInt32.from_napi_value(env, args[1]))
-        var height = Int(JsInt32.from_napi_value(env, args[2]))
-        var factor = JsNumber.from_napi_value(env, args[3])
-        args.free()
+        var width = Int(JsInt32.from_napi_value(bindings, env, args[1]))
+        var height = Int(JsInt32.from_napi_value(bindings, env, args[2]))
+        var factor = JsNumber.from_napi_value(bindings, env, args[3])
         var num_bytes = width * height * 4
-        var src_ptr = ta.data_ptr(env)
-        var ab = JsArrayBuffer.create(env, UInt(num_bytes))
-        var dst_ptr = ab.data_ptr(env)
+        var src_ptr = ta.data_ptr(bindings, env)
+        var ab = JsArrayBuffer.create(bindings, env, UInt(num_bytes))
+        var dst_ptr = ab.data_ptr(bindings, env)
         var factor_fp = UInt32(factor * 256.0)
         _brightness_parallel(src_ptr, dst_ptr, width, height, factor_fp)
-        var result_ta = JsTypedArray.create_uint8(env, ab.value, 0, UInt(num_bytes))
+        var result_ta = JsTypedArray.create_uint8(bindings, env, ab.value, 0, UInt(num_bytes))
         return result_ta.value
     except:
         throw_js_error(env, "brightness failed")
@@ -283,19 +282,18 @@ fn brightness_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 fn threshold_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
-        var args = alloc[NapiValue](4)
-        CbArgs.get_argv(env, info, 4, args)
+        var bindings = CbArgs.get_bindings(env, info)
+        var args = CbArgs.get_four(bindings, env, info)
         var ta = JsTypedArray(args[0])
-        var width = Int(JsInt32.from_napi_value(env, args[1]))
-        var height = Int(JsInt32.from_napi_value(env, args[2]))
-        var thresh = Byte(JsInt32.from_napi_value(env, args[3]))
-        args.free()
+        var width = Int(JsInt32.from_napi_value(bindings, env, args[1]))
+        var height = Int(JsInt32.from_napi_value(bindings, env, args[2]))
+        var thresh = Byte(JsInt32.from_napi_value(bindings, env, args[3]))
         var num_bytes = width * height * 4
-        var src_ptr = ta.data_ptr(env)
-        var ab = JsArrayBuffer.create(env, UInt(num_bytes))
-        var dst_ptr = ab.data_ptr(env)
+        var src_ptr = ta.data_ptr(bindings, env)
+        var ab = JsArrayBuffer.create(bindings, env, UInt(num_bytes))
+        var dst_ptr = ab.data_ptr(bindings, env)
         _threshold_parallel(src_ptr, dst_ptr, width, height, thresh)
-        var result_ta = JsTypedArray.create_uint8(env, ab.value, 0, UInt(num_bytes))
+        var result_ta = JsTypedArray.create_uint8(bindings, env, ab.value, 0, UInt(num_bytes))
         return result_ta.value
     except:
         throw_js_error(env, "threshold failed")
@@ -304,19 +302,18 @@ fn threshold_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 fn blur_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
-        var args = alloc[NapiValue](4)
-        CbArgs.get_argv(env, info, 4, args)
+        var bindings = CbArgs.get_bindings(env, info)
+        var args = CbArgs.get_four(bindings, env, info)
         var ta = JsTypedArray(args[0])
-        var width = Int(JsInt32.from_napi_value(env, args[1]))
-        var height = Int(JsInt32.from_napi_value(env, args[2]))
-        var radius = Int(JsInt32.from_napi_value(env, args[3]))
-        args.free()
+        var width = Int(JsInt32.from_napi_value(bindings, env, args[1]))
+        var height = Int(JsInt32.from_napi_value(bindings, env, args[2]))
+        var radius = Int(JsInt32.from_napi_value(bindings, env, args[3]))
         var num_bytes = width * height * 4
-        var src_ptr = ta.data_ptr(env)
-        var ab = JsArrayBuffer.create(env, UInt(num_bytes))
-        var dst_ptr = ab.data_ptr(env)
+        var src_ptr = ta.data_ptr(bindings, env)
+        var ab = JsArrayBuffer.create(bindings, env, UInt(num_bytes))
+        var dst_ptr = ab.data_ptr(bindings, env)
         _blur_parallel(src_ptr, dst_ptr, width, height, radius)
-        var result_ta = JsTypedArray.create_uint8(env, ab.value, 0, UInt(num_bytes))
+        var result_ta = JsTypedArray.create_uint8(bindings, env, ab.value, 0, UInt(num_bytes))
         return result_ta.value
     except:
         throw_js_error(env, "blur failed")
@@ -332,17 +329,28 @@ fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     except:
         pass
 
+    var bindings_ptr = alloc[NapiBindings](1)
+    try:
+        var bindings = NapiBindings()
+        init_bindings(bindings)
+        bindings_ptr.init_pointee_move(bindings^)
+    except:
+        bindings_ptr.free()
+        return exports
+    var cb_data = bindings_ptr.bitcast[NoneType]()
+
     var gray_ref = grayscale_fn
     var bright_ref = brightness_fn
     var thresh_ref = threshold_fn
     var blur_ref = blur_fn
 
     try:
-        var m = ModuleBuilder(env, exports)
+        var m = ModuleBuilder(env, exports, cb_data)
         m.method("grayscale", fn_ptr(gray_ref))
         m.method("brightness", fn_ptr(bright_ref))
         m.method("threshold", fn_ptr(thresh_ref))
         m.method("blur", fn_ptr(blur_ref))
+        m.flush()
     except:
         pass
 

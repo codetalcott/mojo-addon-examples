@@ -18,6 +18,7 @@ from memory import alloc
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error
+from napi.bindings import NapiBindings, Bindings, init_bindings
 from napi.framework.js_number import JsNumber
 from napi.framework.js_int32 import JsInt32
 from napi.framework.js_typedarray import JsTypedArray
@@ -29,32 +30,32 @@ from napi.framework.runtime import init_async_runtime
 # --- Helper: extract matmul args from JS -------------------------------------
 # Args: (a: Float64Array, b: Float64Array, result: Float64Array, M: int, K: int, N: int)
 
-fn parse_matmul_args(env: NapiEnv, info: NapiValue) raises -> InlineArray[
+fn parse_matmul_args(b: Bindings, env: NapiEnv, info: NapiValue) raises -> InlineArray[
     UnsafePointer[Float64, MutAnyOrigin], 3
 ]:
-    var argc = CbArgs.argc(env, info)
+    var argc = CbArgs.argc(b, env, info)
     if argc < 6:
         raise Error("matmul requires 6 arguments: a, b, result, M, K, N")
     var argv_buf = alloc[NapiValue](6)
-    CbArgs.get_argv(env, info, 6, argv_buf)
+    CbArgs.get_argv(b, env, info, 6, argv_buf)
     var ta_a = JsTypedArray(argv_buf[0])
     var ta_b = JsTypedArray(argv_buf[1])
     var ta_out = JsTypedArray(argv_buf[2])
-    var ptr_a = ta_a.data_ptr(env).bitcast[Float64]()
-    var ptr_b = ta_b.data_ptr(env).bitcast[Float64]()
-    var ptr_out = ta_out.data_ptr(env).bitcast[Float64]()
+    var ptr_a = ta_a.data_ptr(b, env).bitcast[Float64]()
+    var ptr_b = ta_b.data_ptr(b, env).bitcast[Float64]()
+    var ptr_out = ta_out.data_ptr(b, env).bitcast[Float64]()
     argv_buf.free()
     var ptrs = InlineArray[UnsafePointer[Float64, MutAnyOrigin], 3](fill=ptr_a)
     ptrs[1] = ptr_b
     ptrs[2] = ptr_out
     return ptrs^
 
-fn parse_dims(env: NapiEnv, info: NapiValue) raises -> InlineArray[Int, 3]:
+fn parse_dims(b: Bindings, env: NapiEnv, info: NapiValue) raises -> InlineArray[Int, 3]:
     var argv_buf = alloc[NapiValue](6)
-    CbArgs.get_argv(env, info, 6, argv_buf)
-    var M = Int(JsInt32.from_napi_value(env, argv_buf[3]))
-    var K = Int(JsInt32.from_napi_value(env, argv_buf[4]))
-    var N = Int(JsInt32.from_napi_value(env, argv_buf[5]))
+    CbArgs.get_argv(b, env, info, 6, argv_buf)
+    var M = Int(JsInt32.from_napi_value(b, env, argv_buf[3]))
+    var K = Int(JsInt32.from_napi_value(b, env, argv_buf[4]))
+    var N = Int(JsInt32.from_napi_value(b, env, argv_buf[5]))
     argv_buf.free()
     var dims = InlineArray[Int, 3](fill=M)
     dims[1] = K
@@ -80,10 +81,11 @@ fn _matmul_naive(
 
 fn matmul_naive_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
-        var ptrs = parse_matmul_args(env, info)
-        var dims = parse_dims(env, info)
+        var bindings = CbArgs.get_bindings(env, info)
+        var ptrs = parse_matmul_args(bindings, env, info)
+        var dims = parse_dims(bindings, env, info)
         _matmul_naive(ptrs[0], ptrs[1], ptrs[2], dims[0], dims[1], dims[2])
-        return JsNumber.create(env, 0.0).value
+        return JsNumber.create(bindings, env, 0.0).value
     except:
         throw_js_error(env, "matmulNaive failed")
         return NapiValue()
@@ -115,10 +117,11 @@ fn _matmul_vectorized(
 
 fn matmul_vectorized_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
-        var ptrs = parse_matmul_args(env, info)
-        var dims = parse_dims(env, info)
+        var bindings = CbArgs.get_bindings(env, info)
+        var ptrs = parse_matmul_args(bindings, env, info)
+        var dims = parse_dims(bindings, env, info)
         _matmul_vectorized(ptrs[0], ptrs[1], ptrs[2], dims[0], dims[1], dims[2])
-        return JsNumber.create(env, 0.0).value
+        return JsNumber.create(bindings, env, 0.0).value
     except:
         throw_js_error(env, "matmulVectorized failed")
         return NapiValue()
@@ -165,10 +168,11 @@ fn _matmul_tiled(
 
 fn matmul_tiled_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
-        var ptrs = parse_matmul_args(env, info)
-        var dims = parse_dims(env, info)
+        var bindings = CbArgs.get_bindings(env, info)
+        var ptrs = parse_matmul_args(bindings, env, info)
+        var dims = parse_dims(bindings, env, info)
         _matmul_tiled(ptrs[0], ptrs[1], ptrs[2], dims[0], dims[1], dims[2])
-        return JsNumber.create(env, 0.0).value
+        return JsNumber.create(bindings, env, 0.0).value
     except:
         throw_js_error(env, "matmulTiled failed")
         return NapiValue()
@@ -217,10 +221,11 @@ fn _matmul_parallel(
 
 fn matmul_parallel_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
-        var ptrs = parse_matmul_args(env, info)
-        var dims = parse_dims(env, info)
+        var bindings = CbArgs.get_bindings(env, info)
+        var ptrs = parse_matmul_args(bindings, env, info)
+        var dims = parse_dims(bindings, env, info)
         _matmul_parallel(ptrs[0], ptrs[1], ptrs[2], dims[0], dims[1], dims[2])
-        return JsNumber.create(env, 0.0).value
+        return JsNumber.create(bindings, env, 0.0).value
     except:
         throw_js_error(env, "matmulParallel failed")
         return NapiValue()
@@ -235,17 +240,28 @@ fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     except:
         pass
 
+    var bindings_ptr = alloc[NapiBindings](1)
+    try:
+        var bindings = NapiBindings()
+        init_bindings(bindings)
+        bindings_ptr.init_pointee_move(bindings^)
+    except:
+        bindings_ptr.free()
+        return exports
+    var cb_data = bindings_ptr.bitcast[NoneType]()
+
     var naive_ref = matmul_naive_fn
     var vec_ref = matmul_vectorized_fn
     var tiled_ref = matmul_tiled_fn
     var par_ref = matmul_parallel_fn
 
     try:
-        var m = ModuleBuilder(env, exports)
+        var m = ModuleBuilder(env, exports, cb_data)
         m.method("matmulNaive", fn_ptr(naive_ref))
         m.method("matmulVectorized", fn_ptr(vec_ref))
         m.method("matmulTiled", fn_ptr(tiled_ref))
         m.method("matmulParallel", fn_ptr(par_ref))
+        m.flush()
     except:
         pass
 
