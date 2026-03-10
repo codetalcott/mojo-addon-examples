@@ -2,18 +2,32 @@ name: Build & Test
 
 on:
   schedule:
-    - cron: '0 8 * * 3'  # Wednesday 8am UTC (after napi-mojo canary Mon/Thu)
+    - cron: '0 6 * * 1'  # Monday 6am UTC
   workflow_dispatch:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && fromJSON('["macos-latest", "ubuntu-latest"]') || fromJSON('["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
 
     steps:
