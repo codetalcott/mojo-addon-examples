@@ -104,7 +104,6 @@ V8's JIT compiler is already fast for scalar code. The matmul example shows this
 
 - [pixi](https://prefix.dev/docs/pixi/) with Mojo nightly
 - Node.js 18+
-- napi-mojo (linked via npm)
 
 ## Quick Start
 
@@ -122,3 +121,14 @@ node stats/stats.js
 node image/image.js
 node wyhash/hash.js
 ```
+
+## Development
+
+To test examples against a local (unreleased) version of napi-mojo:
+
+```bash
+cd /path/to/napi-mojo && npm link
+cd /path/to/mojo-addon-examples && npm link napi-mojo
+```
+
+This replaces the npm-installed package with a symlink to your local checkout. Run `npm install` to revert back to the published package.

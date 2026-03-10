@@ -43,13 +43,20 @@ fn _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
 
 
 # --- SIMD helper: count matching bytes in a SIMD vector via XOR ---------------
-# XOR with target splat: matching bytes become 0x00.
-# Collapse all bits per byte with OR chain, mask bit 0: 0 = match, 1 = non-match.
-# Count = width - reduce_add(non_match_bits).
+#
+# How the XOR + bit-collapse trick works:
+#   1. XOR each byte with the target. Matching bytes become 0x00, non-matches
+#      become some non-zero value (at least one bit is set).
+#   2. OR-shift chain: OR the byte with itself right-shifted by 1, 2, ... 7.
+#      This "smears" any set bit down to the LSB. After all 7 shifts, the LSB
+#      is 1 if *any* bit was originally set (non-match), 0 if the byte was 0x00.
+#   3. Mask the LSB and sum: reduce_add gives the count of non-matches.
+#      Subtract from width to get the match count.
+#
+# This avoids per-byte branching and runs entirely in SIMD registers.
 
 fn _simd_count_matches[width: Int](chunk: SIMD[DType.uint8, width], target: Byte) -> Int:
     var xored = chunk ^ SIMD[DType.uint8, width](target)
-    # Collapse each byte to 1 if any bit set (non-match), 0 if all zero (match)
     var collapsed = xored | (xored >> 1) | (xored >> 2) | (xored >> 3) | (xored >> 4) | (xored >> 5) | (xored >> 6) | (xored >> 7)
     var non_match = collapsed & SIMD[DType.uint8, width](1)
     return width - Int(non_match.reduce_add())
@@ -124,7 +131,17 @@ fn _collect_byte_positions(
     return idx
 
 
-# --- Multi-byte search: first+last byte SIMD technique -----------------------
+# --- Multi-byte search: first+last byte SIMD filter --------------------------
+#
+# For multi-byte needles, checking every position against the full needle is
+# expensive. Instead, we use a SIMD pre-filter:
+#   1. Load a SIMD chunk at each candidate position and XOR with the first byte.
+#   2. Load a second chunk offset by (needle_len - 1) and XOR with the last byte.
+#   3. OR the two results: a lane is 0 only if both first AND last bytes match.
+#   4. Only for those candidate lanes, verify the middle bytes with a scalar loop.
+#
+# This eliminates most non-matching positions in bulk via SIMD, then only does
+# expensive byte-by-byte comparison on the rare candidates that pass the filter.
 
 fn _count_multi_byte(
     data: UnsafePointer[Byte, MutAnyOrigin],

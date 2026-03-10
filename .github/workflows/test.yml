@@ -32,13 +32,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: mojo-addon-examples
-
-      - uses: actions/checkout@v4
-        with:
-          repository: codetalcott/napi-mojo
-          path: napi-mojo
 
       - uses: actions/setup-node@v4
         with:
@@ -47,16 +40,13 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.8.8
         with:
           pixi-version: latest
-          manifest-path: mojo-addon-examples/pixi.toml
+          manifest-path: pixi.toml
 
       - name: Install dependencies
-        working-directory: mojo-addon-examples
         run: npm install
 
       - name: Build all examples
-        working-directory: mojo-addon-examples
         run: pixi run bash -c "npm run build:all"
 
       - name: Run smoke tests
-        working-directory: mojo-addon-examples
         run: npm test
