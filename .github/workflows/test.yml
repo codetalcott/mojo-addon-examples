@@ -49,4 +49,4 @@ jobs:
         run: pixi run bash -c "npm run build:all"
 
       - name: Run smoke tests
-        run: npm test
+        run: pixi run bash -c "npm test"
