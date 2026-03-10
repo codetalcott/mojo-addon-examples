@@ -18,6 +18,6 @@
     "test": "node matmul/test.js && node simd-search/test.js && node stats/test.js && node image/test.js && node wyhash/test.js"
   },
   "dependencies": {
-    "napi-mojo": "file:../mojo-node-api"
+    "napi-mojo": "file:../napi-mojo"
   }
 }

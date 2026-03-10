@@ -37,8 +37,8 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          repository: codetalcott/mojo-node-api
-          path: mojo-node-api
+          repository: codetalcott/napi-mojo
+          path: napi-mojo
 
       - uses: actions/setup-node@v4
         with:

@@ -1,11 +1,11 @@
 # Mojo Addon Examples — Roadmap
 
-High-performance Node.js addon examples built with [napi-mojo](https://github.com/codetalcott/mojo-node-api). Each example demonstrates Mojo's SIMD `vectorize()` and `parallelize()` through the N-API bridge, with benchmarks against pure JavaScript and V8 JIT.
+High-performance Node.js addon examples built with [napi-mojo](https://github.com/codetalcott/napi-mojo). Each example demonstrates Mojo's SIMD `vectorize()` and `parallelize()` through the N-API bridge, with benchmarks against pure JavaScript and V8 JIT.
 
 ## Completed
 
 ### Vector Similarity (in napi-mojo repo)
-**Location:** `mojo-node-api/examples/vectors-addon.mojo`
+**Location:** `napi-mojo/examples/vectors-addon.mojo`
 
 Dot product, cosine similarity, euclidean distance on Float64Arrays. SIMD + parallel across CPU cores for large vectors.
 
