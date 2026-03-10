@@ -49,4 +49,9 @@ jobs:
         run: pixi run bash -c "npm run build:all"
 
       - name: Run smoke tests
-        run: pixi run bash -c "npm test"
+        run: |
+          pixi run bash -c '
+            export LD_LIBRARY_PATH="$CONDA_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            export LD_PRELOAD="$CONDA_PREFIX/lib/libKGENCompilerRTShared.so${LD_PRELOAD:+:$LD_PRELOAD}"
+            npm test
+          '
