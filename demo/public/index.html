@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mojo Addon Examples — Live Demo</title>
-  <meta name="description" content="High-performance Node.js native addons built with Mojo. See SIMD vectorization and multi-core parallelism in action.">
+  <title>napi-mojo examples — Native Performance in Node.js</title>
+  <meta name="description" content="Five practical examples of high-performance Node.js native addons built with napi-mojo. SIMD vectorization and multi-core parallelism via Mojo.">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -12,7 +12,7 @@
   <!-- Header -->
   <header class="site-header">
     <div class="container">
-      <a href="/" class="site-title">mojo-addon-examples</a>
+      <a href="/" class="site-title">napi-mojo examples</a>
       <div class="header-links">
         <a href="https://github.com/codetalcott/mojo-addon-examples" class="hide-mobile">GitHub</a>
         <a href="https://www.npmjs.com/package/napi-mojo" class="hide-mobile">napi-mojo</a>
@@ -28,9 +28,16 @@
   <section class="hero container">
     <h1>Native Performance in Node.js</h1>
     <p>
-      Five practical examples showing what Mojo's SIMD vectorization and
+      Five practical examples built with
+      <a href="https://www.npmjs.com/package/napi-mojo">napi-mojo</a>,
+      a Mojo-to-Node.js N-API bridge. See what SIMD vectorization and
       multi-core parallelism can do for your Node.js workloads —
       from image processing to statistical analysis.
+    </p>
+    <p class="hero-methodology">
+      All timings below were measured on this server at startup. Each benchmark
+      uses warmup iterations to ensure JIT compilation, then averages multiple
+      runs. JS baselines use the same algorithm and methodology for fair comparison.
     </p>
     <div class="hero-links">
       <a href="https://github.com/codetalcott/mojo-addon-examples" class="btn-primary">View Source</a>
@@ -235,8 +242,9 @@ fn wyhash(data: UnsafePointer[Byte, MutAnyOrigin],
   <!-- Footer -->
   <footer class="site-footer">
     <div class="container">
-      Built with <a href="https://www.npmjs.com/package/napi-mojo">napi-mojo</a> —
-      <a href="https://github.com/codetalcott/mojo-addon-examples">Source on GitHub</a>
+      <div>Built with <a href="https://www.npmjs.com/package/napi-mojo">napi-mojo</a> —
+      <a href="https://github.com/codetalcott/mojo-addon-examples">Source on GitHub</a></div>
+      <div id="server-info" class="server-info"></div>
     </div>
   </footer>
 

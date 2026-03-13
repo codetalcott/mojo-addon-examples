@@ -441,6 +441,15 @@ async function startup() {
   }
 
   const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+  cache.info = {
+    computedAt: new Date().toISOString(),
+    warmupSeconds: +elapsed,
+    platform: process.platform,
+    arch: process.arch,
+    cpus: require('os').cpus().length,
+    cpuModel: require('os').cpus()[0]?.model || 'unknown',
+    nodeVersion: process.version,
+  };
   console.log(`All demos cached in ${elapsed}s, ready to serve`);
 
   app.listen(PORT, () => {
@@ -464,6 +473,7 @@ app.get('/api/stats/demo', serveCache('stats'));
 app.get('/api/search/demo', serveCache('search'));
 app.get('/api/matmul/demo', serveCache('matmul'));
 app.get('/api/hash/demo', serveCache('hash'));
+app.get('/api/info', serveCache('info'));
 
 // --- Start ------------------------------------------------------------------
 

@@ -295,6 +295,22 @@ async function loadHashDemo() {
   }
 }
 
+// 6. Server info
+
+async function loadServerInfo() {
+  try {
+    const data = await fetchJson('/api/info');
+    const el = document.getElementById('server-info');
+    if (el) {
+      const when = new Date(data.computedAt);
+      const timeStr = when.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+      el.textContent = `Results computed ${timeStr} on ${data.cpuModel} (${data.cpus} cores), Node ${data.nodeVersion}`;
+    }
+  } catch {
+    // non-critical, silently ignore
+  }
+}
+
 // --- Load all demos on page load ---
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -303,4 +319,5 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSearchDemo();
   loadMatmulDemo();
   loadHashDemo();
+  loadServerInfo();
 });
