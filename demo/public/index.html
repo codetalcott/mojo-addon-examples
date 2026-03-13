@@ -53,11 +53,22 @@
       <div class="code-section">
         <button class="code-toggle" onclick="toggleCode('image-code')">View Mojo Source</button>
         <div class="code-block" id="image-code">
-          <pre><code class="language-mojo">fn _grayscale_parallel(
-    src: UnsafePointer[Byte, MutAnyOrigin],
+          <pre><code class="language-mojo"># Integer approximation: gray = (77*R + 150*G + 29*B) >> 8
+fn _grayscale_rows(src: UnsafePointer[Byte, MutAnyOrigin],
     dst: UnsafePointer[Byte, MutAnyOrigin],
-    width: Int, height: Int,
-):
+    start_row: Int, end_row: Int, width: Int):
+    for row in range(start_row, end_row):
+        var row_offset = row * width * 4
+        for x in range(width):
+            var off = row_offset + x * 4
+            var r = UInt16(src[off])
+            var g = UInt16(src[off + 1])
+            var b = UInt16(src[off + 2])
+            var gray = Byte((77 * r + 150 * g + 29 * b) >> 8)
+            dst[off] = gray; dst[off + 1] = gray; dst[off + 2] = gray
+            dst[off + 3] = src[off + 3]
+
+fn _grayscale_parallel(src, dst, width: Int, height: Int):
     var rows_per = height // NUM_WORKERS
     fn worker(wid: Int) capturing:
         var s = wid * rows_per
@@ -80,21 +91,31 @@
       <div class="code-section">
         <button class="code-toggle" onclick="toggleCode('stats-code')">View Mojo Source</button>
         <div class="code-block" id="stats-code">
-          <pre><code class="language-mojo">fn _stats_kernel(
-    data: UnsafePointer[Float64, MutAnyOrigin],
-    n: Int,
-) -> StatResult:
-    var sum: Float64 = 0.0
-    var min_val = data[0]
-    var max_val = data[0]
+          <pre><code class="language-mojo"># SIMD sum/min/max in one pass over Float64 data
+fn _simd_sum_min_max(data: UnsafePointer[Float64, MutAnyOrigin],
+    start: Int, end: Int) -> InlineArray[Float64, 3]:
+    var vsum: Float64 = 0.0
+    var vmin: Float64 = data[start]
+    var vmax: Float64 = data[start]
+    var base = start
+    fn compute[width: Int](offset: Int) unified {mut}:
+        var chunk = data.load[width=width](base + offset)
+        vsum += chunk.reduce_add()
+        var cmin = chunk.reduce_min()
+        var cmax = chunk.reduce_max()
+        if cmin < vmin: vmin = cmin
+        if cmax > vmax: vmax = cmax
+    vectorize[simd_width_of[DType.float64]()](end - start, compute)
+    # ...
 
-    # SIMD reduction: process 4 Float64s per cycle
-    fn reduce[width: Int](i: Int) unified {mut}:
-        var chunk = data.load[width=width](i)
-        sum += chunk.reduce_add()
-        min_val = min(min_val, chunk.reduce_min())
-        max_val = max(max_val, chunk.reduce_max())
-    vectorize[simd_width_of[DType.float64]()](n, reduce)</code></pre>
+# Parallel dispatch across CPU cores
+fn _parallel_sum_min_max(data, size: Int) -> InlineArray[Float64, 3]:
+    var chunk_size = size // NUM_WORKERS
+    fn worker(wid: Int) capturing:
+        var s = wid * chunk_size
+        var e = s + chunk_size if wid < NUM_WORKERS - 1 else size
+        partials[wid] = _simd_sum_min_max(data, s, e)
+    parallelize[worker](NUM_WORKERS)</code></pre>
         </div>
       </div>
     </section>
@@ -111,17 +132,24 @@
       <div class="code-section">
         <button class="code-toggle" onclick="toggleCode('search-code')">View Mojo Source</button>
         <div class="code-block" id="search-code">
-          <pre><code class="language-mojo">fn _count_byte_simd(
-    data: UnsafePointer[Byte, MutAnyOrigin],
-    n: Int, target: Byte,
-) -> Int:
+          <pre><code class="language-mojo"># XOR + bit-collapse trick: matching bytes become 0x00, non-matches
+# get smeared to LSB=1. Avoids per-byte branching, runs in SIMD regs.
+fn _simd_count_matches[width: Int](
+    chunk: SIMD[DType.uint8, width], target: Byte) -> Int:
+    var xored = chunk ^ SIMD[DType.uint8, width](target)
+    var collapsed = xored | (xored >> 1) | (xored >> 2) | (xored >> 3)
+        | (xored >> 4) | (xored >> 5) | (xored >> 6) | (xored >> 7)
+    var non_match = collapsed & SIMD[DType.uint8, width](1)
+    return width - Int(non_match.reduce_add())
+
+# SIMD vectorized scan with parallel dispatch for large buffers
+fn _count_byte_range(data, target: Byte, start: Int, end: Int) -> Int:
     var count: Int = 0
-    # Compare 64 bytes at once using SIMD
-    fn scan[width: Int](i: Int) unified {mut}:
-        var chunk = data.load[width=width](i)
-        var matches = chunk == SIMD[DType.uint8, width](target)
-        count += Int(matches.cast[DType.uint8]().reduce_add())
-    vectorize[64](n, scan)
+    var base = start
+    fn compute[width: Int](offset: Int) unified {mut}:
+        var chunk = data.load[width=width](base + offset)
+        count += _simd_count_matches(chunk, target)
+    vectorize[simd_width_of[DType.uint8]()](end - start, compute)
     return count</code></pre>
         </div>
       </div>
@@ -139,8 +167,9 @@
       <div class="code-section">
         <button class="code-toggle" onclick="toggleCode('matmul-code')">View Mojo Source</button>
         <div class="code-block" id="matmul-code">
-          <pre><code class="language-mojo"># SIMD vectorized inner loop — process multiple columns at once
-fn _matmul_vectorized(a, b, c, M, K, N):
+          <pre><code class="language-mojo"># Reorder to i,k,j so inner j-loop is contiguous and vectorizable
+fn _matmul_vectorized(a, b, c: UnsafePointer[Float64, MutAnyOrigin],
+    M: Int, K: Int, N: Int):
     for i in range(M):
         var row_c = i * N
         for p in range(K):
@@ -150,7 +179,16 @@ fn _matmul_vectorized(a, b, c, M, K, N):
                 var b_chunk = b.load[width=width](row_b + j)
                 var c_chunk = c.load[width=width](row_c + j)
                 c.store[width=width](row_c + j, c_chunk + a_ip * b_chunk)
-            vectorize[simd_width_of[DType.float64]()](N, compute)</code></pre>
+            vectorize[simd_width_of[DType.float64]()](N, compute)
+
+# Parallel: distributes tile-row strips across CPU cores
+fn _matmul_parallel(a, b, c, M: Int, K: Int, N: Int):
+    fn worker(wid: Int) capturing:
+        var ii = wid * TILE_SIZE        # stride by NUM_WORKERS
+        while ii < M:
+            # ... tiled SIMD kernel (same as above) ...
+            ii += NUM_WORKERS * TILE_SIZE
+    parallelize[worker](NUM_WORKERS)</code></pre>
         </div>
       </div>
     </section>
@@ -167,18 +205,27 @@ fn _matmul_vectorized(a, b, c, M, K, N):
       <div class="code-section">
         <button class="code-toggle" onclick="toggleCode('hash-code')">View Mojo Source</button>
         <div class="code-block" id="hash-code">
-          <pre><code class="language-mojo"># 48-byte main loop — process 3 x 16-byte blocks per iteration
-fn _wyhash_core(data: UnsafePointer[Byte, MutAnyOrigin],
-                len: Int, seed: UInt64) -> UInt64:
+          <pre><code class="language-mojo"># 128-bit folded multiply: (a * b) as 128-bit, return lo XOR hi
+fn _wymum(a: UInt64, b: UInt64) -> UInt64:
+    var m = a.cast[DType.uint128]() * b.cast[DType.uint128]()
+    var parts = bitcast[DType.uint64, 2](m)
+    return parts[0] ^ parts[1]
+
+# 48-byte main loop — 3-way seed mixing
+fn wyhash(data: UnsafePointer[Byte, MutAnyOrigin],
+    length: Int, in_seed: UInt64) -> UInt64:
+    # ... short-path handling for <= 48 bytes ...
     var see1 = seed
     var see2 = seed
-    var p = 0
-    while len - p > 48:
-        seed = wymum(wyr8(data, p) ^ WYP1, wyr8(data, p + 8) ^ seed)
-        see1 = wymum(wyr8(data, p + 16) ^ WYP2, wyr8(data, p + 24) ^ see1)
-        see2 = wymum(wyr8(data, p + 32) ^ WYP3, wyr8(data, p + 40) ^ see2)
-        p += 48
-    return wymum(WYP1 ^ UInt64(len), wymum(a ^ WYP1, b ^ seed))</code></pre>
+    var i = 0
+    var remaining = length
+    while remaining > 48:
+        seed = _wymum(_wyr8(data, i) ^ _WYP1, _wyr8(data, i + 8) ^ seed)
+        see1 = _wymum(_wyr8(data, i + 16) ^ _WYP2, _wyr8(data, i + 24) ^ see1)
+        see2 = _wymum(_wyr8(data, i + 32) ^ _WYP3, _wyr8(data, i + 40) ^ see2)
+        i += 48; remaining -= 48
+    seed ^= see1 ^ see2
+    return _wymum(_WYP1 ^ UInt64(length), _wymum(a ^ _WYP1, b ^ seed))</code></pre>
         </div>
       </div>
     </section>

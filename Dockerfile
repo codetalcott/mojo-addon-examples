@@ -48,8 +48,8 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Copy demo package and install
-COPY demo/package.json demo/package-lock.json* demo/
+# Copy demo package and install dependencies
+COPY demo/package.json demo/package-lock.json demo/
 RUN cd demo && npm ci --omit=dev 2>/dev/null || cd demo && npm install --omit=dev
 
 # Copy pre-built .node addon files from builder
@@ -66,8 +66,10 @@ COPY stats/*.js stats/
 COPY image/*.js image/
 COPY wyhash/*.js wyhash/
 
-# Copy demo source
-COPY demo/ demo/
+# Copy demo source and assets (after npm install to leverage cache)
+COPY demo/server.js demo/
+COPY demo/public/ demo/public/
+COPY demo/assets/ demo/assets/
 
 EXPOSE 8080
 CMD ["node", "demo/server.js"]

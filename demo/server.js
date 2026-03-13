@@ -1,10 +1,11 @@
 // demo/server.js — Express server for mojo-addon-examples live demo
 //
-// Serves a single-page showcase and 5 API endpoints that run the Mojo addons.
+// Computes all demo results once at startup, then serves cached JSON.
 // The addons are pre-built .node files — no Mojo runtime needed at serving time.
 
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const { performance } = require('perf_hooks');
 
 const app = express();
@@ -148,22 +149,35 @@ function bench(fn, warmup = 3, iters = 10) {
   return (performance.now() - t0) / iters;
 }
 
-// --- API: Image processing --------------------------------------------------
+// --- Result cache -----------------------------------------------------------
+// All demo results are computed once at startup and served from memory.
 
-app.get('/api/image/demo', async (req, res) => {
+const cache = {};
+
+// --- Compute: Image ---------------------------------------------------------
+
+async function computeImageDemo() {
+  let sharp;
   try {
-    let sharp;
-    try {
-      sharp = require('sharp');
-    } catch {
-      // sharp not available — use synthetic image
-      return sendSyntheticImageDemo(res);
-    }
+    sharp = require('sharp');
+  } catch {
+    return computeSyntheticImageDemo();
+  }
 
-    // Generate a colorful test image (gradient)
-    const width = 640;
-    const height = 480;
-    const rgba = new Uint8Array(width * height * 4);
+  // Use bundled sample photo if available, otherwise generate gradient
+  const samplePath = path.join(__dirname, 'assets', 'sample.jpg');
+  let width, height, rgba;
+
+  if (fs.existsSync(samplePath)) {
+    const img = sharp(samplePath);
+    const meta = await img.metadata();
+    width = meta.width;
+    height = meta.height;
+    rgba = new Uint8Array(await img.ensureAlpha().raw().toBuffer());
+  } else {
+    width = 640;
+    height = 480;
+    rgba = new Uint8Array(width * height * 4);
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const i = (y * width + x) * 4;
@@ -173,54 +187,52 @@ app.get('/api/image/demo', async (req, res) => {
         rgba[i + 3] = 255;
       }
     }
-
-    // Run Mojo transforms with bench() for consistent timing methodology
-    const transforms = {};
-
-    transforms.grayscale = { ms: bench(() => imageAddon.grayscale(rgba, width, height), 3, 10) };
-    transforms.brightness = { ms: bench(() => imageAddon.brightness(rgba, width, height, 1.5), 3, 10) };
-    transforms.threshold = { ms: bench(() => imageAddon.threshold(rgba, width, height, 128), 3, 10) };
-    transforms.blur = { ms: bench(() => imageAddon.blur(rgba, width, height, 5), 3, 10) };
-
-    // Get actual result buffers for PNG encoding (post-bench)
-    const grayRgba = imageAddon.grayscale(rgba, width, height);
-    const brightRgba = imageAddon.brightness(rgba, width, height, 1.5);
-    const threshRgba = imageAddon.threshold(rgba, width, height, 128);
-    const blurRgba = imageAddon.blur(rgba, width, height, 5);
-
-    // JS baseline for grayscale (same bench methodology)
-    const jsMs = bench(() => jsGrayscale(rgba, width, height), 3, 10);
-    transforms.jsGrayscaleMs = jsMs;
-
-    // Convert to base64 PNG via sharp
-    const toPng = async (data) => {
-      const buf = await sharp(Buffer.from(data.buffer), { raw: { width, height, channels: 4 } })
-        .png({ compressionLevel: 6 })
-        .toBuffer();
-      return buf.toString('base64');
-    };
-
-    const [origPng, grayPng, brightPng, threshPng, blurPng] = await Promise.all([
-      toPng(rgba), toPng(grayRgba), toPng(brightRgba), toPng(threshRgba), toPng(blurRgba),
-    ]);
-
-    res.json({
-      width, height,
-      transforms,
-      images: {
-        original: origPng,
-        grayscale: grayPng,
-        brightness: brightPng,
-        threshold: threshPng,
-        blur: blurPng,
-      },
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
   }
-});
 
-function sendSyntheticImageDemo(res) {
+  // Run Mojo transforms with bench() for consistent timing methodology
+  const transforms = {};
+
+  transforms.grayscale = { ms: bench(() => imageAddon.grayscale(rgba, width, height), 3, 10) };
+  transforms.brightness = { ms: bench(() => imageAddon.brightness(rgba, width, height, 1.5), 3, 10) };
+  transforms.threshold = { ms: bench(() => imageAddon.threshold(rgba, width, height, 128), 3, 10) };
+  transforms.blur = { ms: bench(() => imageAddon.blur(rgba, width, height, 5), 3, 10) };
+
+  // Get actual result buffers for PNG encoding (post-bench)
+  const grayRgba = imageAddon.grayscale(rgba, width, height);
+  const brightRgba = imageAddon.brightness(rgba, width, height, 1.5);
+  const threshRgba = imageAddon.threshold(rgba, width, height, 128);
+  const blurRgba = imageAddon.blur(rgba, width, height, 5);
+
+  // JS baseline for grayscale (same bench methodology)
+  const jsMs = bench(() => jsGrayscale(rgba, width, height), 3, 10);
+  transforms.jsGrayscaleMs = jsMs;
+
+  // Convert to base64 PNG via sharp
+  const toPng = async (data) => {
+    const buf = await sharp(Buffer.from(data.buffer), { raw: { width, height, channels: 4 } })
+      .png({ compressionLevel: 6 })
+      .toBuffer();
+    return buf.toString('base64');
+  };
+
+  const [origPng, grayPng, brightPng, threshPng, blurPng] = await Promise.all([
+    toPng(rgba), toPng(grayRgba), toPng(brightRgba), toPng(threshRgba), toPng(blurRgba),
+  ]);
+
+  return {
+    width, height,
+    transforms,
+    images: {
+      original: origPng,
+      grayscale: grayPng,
+      brightness: brightPng,
+      threshold: threshPng,
+      blur: blurPng,
+    },
+  };
+}
+
+function computeSyntheticImageDemo() {
   // Fallback: run transforms with timing but no PNG output
   const width = 1280, height = 720;
   const rgba = new Uint8Array(width * height * 4);
@@ -242,42 +254,38 @@ function sendSyntheticImageDemo(res) {
   transforms.blur = { ms: bench(() => imageAddon.blur(rgba, width, height, 5), 3, 10) };
   transforms.jsGrayscaleMs = bench(() => jsGrayscale(rgba, width, height), 3, 10);
 
-  res.json({ width, height, transforms, images: null });
+  return { width, height, transforms, images: null };
 }
 
-// --- API: Stats -------------------------------------------------------------
+// --- Compute: Stats ---------------------------------------------------------
 
-app.get('/api/stats/demo', (req, res) => {
-  try {
-    const SIZE = 1_000_000;
-    const data = new Float64Array(SIZE);
-    for (let i = 0; i < SIZE; i++) data[i] = Math.random() * 1000;
+function computeStatsDemo() {
+  const SIZE = 1_000_000;
+  const data = new Float64Array(SIZE);
+  for (let i = 0; i < SIZE; i++) data[i] = Math.random() * 1000;
 
-    // Mojo stats (with warmup for fair timing)
-    const mojoStatsMs = bench(() => statsAddon.stats(data), 3, 10);
-    const result = statsAddon.stats(data);
+  // Mojo stats (with warmup for fair timing)
+  const mojoStatsMs = bench(() => statsAddon.stats(data), 3, 10);
+  const result = statsAddon.stats(data);
 
-    // Mojo histogram
-    const mojoHistMs = bench(() => statsAddon.histogram(data, 50), 3, 10);
-    const hist = statsAddon.histogram(data, 50);
+  // Mojo histogram
+  const mojoHistMs = bench(() => statsAddon.histogram(data, 50), 3, 10);
+  const hist = statsAddon.histogram(data, 50);
 
-    // JS baseline (includes sort for percentiles, same as Mojo)
-    const jsMs = bench(() => jsStats(data), 2, 5);
+  // JS baseline (includes sort for percentiles, same as Mojo)
+  const jsMs = bench(() => jsStats(data), 2, 5);
 
-    res.json({
-      size: SIZE,
-      stats: result,
-      histogram: Array.from(hist),
-      mojoStatsMs,
-      mojoHistMs,
-      jsMs,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  return {
+    size: SIZE,
+    stats: result,
+    histogram: Array.from(hist),
+    mojoStatsMs,
+    mojoHistMs,
+    jsMs,
+  };
+}
 
-// --- API: SIMD Search -------------------------------------------------------
+// --- Compute: Search --------------------------------------------------------
 
 // Pre-generate a text buffer (simulated log file)
 const SEARCH_BUF_SIZE = 16 * 1024 * 1024; // 16MB
@@ -292,119 +300,171 @@ for (let i = 0; i < SEARCH_BUF_SIZE / 1000; i++) {
   errorBuf.copy(searchBuf, pos);
 }
 
-app.get('/api/search/demo', (req, res) => {
-  try {
-    // Mojo countLines (warmed, multi-iteration)
-    const mojoLinesMs = bench(() => searchAddon.countLines(searchBuf), 3, 10);
-    const lineCount = searchAddon.countLines(searchBuf);
+function computeSearchDemo() {
+  // Mojo countLines (warmed, multi-iteration)
+  const mojoLinesMs = bench(() => searchAddon.countLines(searchBuf), 3, 10);
+  const lineCount = searchAddon.countLines(searchBuf);
 
-    // Mojo searchAll (warmed, multi-iteration)
-    const mojoSearchMs = bench(() => searchAddon.searchAll(searchBuf, errorBuf), 3, 10);
-    const positions = searchAddon.searchAll(searchBuf, errorBuf);
+  // Mojo searchAll (warmed, multi-iteration)
+  const mojoSearchMs = bench(() => searchAddon.searchAll(searchBuf, errorBuf), 3, 10);
+  const positions = searchAddon.searchAll(searchBuf, errorBuf);
 
-    // JS baselines (same bench methodology)
-    const jsLinesMs = bench(() => jsCountLines(searchBuf), 3, 10);
+  // JS baselines (same bench methodology)
+  const jsLinesMs = bench(() => jsCountLines(searchBuf), 3, 10);
 
-    res.json({
-      bufferSize: SEARCH_BUF_SIZE,
-      lineCount,
-      matchCount: positions.length,
-      pattern: 'ERROR',
-      mojoLinesMs,
-      mojoSearchMs,
-      jsLinesMs,
+  return {
+    bufferSize: SEARCH_BUF_SIZE,
+    lineCount,
+    matchCount: positions.length,
+    pattern: 'ERROR',
+    mojoLinesMs,
+    mojoSearchMs,
+    jsLinesMs,
+  };
+}
+
+// --- Compute: Matmul --------------------------------------------------------
+
+function computeMatmulDemo() {
+  const SIZE = 512;
+  const a = new Float64Array(SIZE * SIZE);
+  const b = new Float64Array(SIZE * SIZE);
+  for (let i = 0; i < SIZE * SIZE; i++) {
+    a[i] = Math.random();
+    b[i] = Math.random();
+  }
+
+  const results = {};
+
+  // JS baseline (naive) — same warmup/iter pattern for fair timing
+  const cJs = new Float64Array(SIZE * SIZE);
+  results.jsNaiveMs = bench(() => jsMatmulNaive(a, b, cJs, SIZE, SIZE, SIZE), 1, 3);
+
+  // Mojo naive
+  const c1 = new Float64Array(SIZE * SIZE);
+  results.naiveMs = bench(() => matmulAddon.matmulNaive(a, b, c1, SIZE, SIZE, SIZE), 1, 3);
+
+  // Mojo vectorized
+  const c2 = new Float64Array(SIZE * SIZE);
+  results.vectorizedMs = bench(() => matmulAddon.matmulVectorized(a, b, c2, SIZE, SIZE, SIZE), 1, 5);
+
+  // Mojo tiled
+  const c3 = new Float64Array(SIZE * SIZE);
+  results.tiledMs = bench(() => matmulAddon.matmulTiled(a, b, c3, SIZE, SIZE, SIZE), 1, 5);
+
+  // Mojo parallel
+  const c4 = new Float64Array(SIZE * SIZE);
+  results.parallelMs = bench(() => matmulAddon.matmulParallel(a, b, c4, SIZE, SIZE, SIZE), 2, 10);
+
+  results.size = SIZE;
+
+  return results;
+}
+
+// --- Compute: Hash ----------------------------------------------------------
+
+function computeHashDemo() {
+  const sizes = [1024, 65536, 1048576, 16777216];
+  const results = [];
+
+  for (const size of sizes) {
+    const buf = Buffer.alloc(size);
+    for (let i = 0; i < size; i++) buf[i] = (i * 7 + 13) & 0xFF;
+
+    const iters = size <= 65536 ? 1000 : size <= 1048576 ? 100 : 10;
+    const mojoMs = bench(() => hashAddon.wyHash64(buf), 3, iters);
+    // Same algorithm (wyhash) in JS BigInt — apples-to-apples comparison
+    const jsWyhashMs = bench(() => jsWyhash(buf), 3, Math.max(1, Math.floor(iters / 10)));
+    // Also show FNV-1a as a "best JS can do with Number arithmetic" reference
+    const jsFnvMs = bench(() => jsFnv1a(buf), 3, iters);
+
+    const mojoGBs = (size / 1e9) / (mojoMs / 1000);
+    const jsWyhashGBs = (size / 1e9) / (jsWyhashMs / 1000);
+    const jsFnvGBs = (size / 1e9) / (jsFnvMs / 1000);
+
+    results.push({
+      size,
+      sizeLabel: size >= 1048576 ? `${size / 1048576}MB` : `${size / 1024}KB`,
+      mojoMs: +mojoMs.toFixed(4),
+      jsWyhashMs: +jsWyhashMs.toFixed(4),
+      jsFnvMs: +jsFnvMs.toFixed(4),
+      mojoGBs: +mojoGBs.toFixed(2),
+      jsWyhashGBs: +jsWyhashGBs.toFixed(2),
+      jsFnvGBs: +jsFnvGBs.toFixed(2),
+      // Primary speedup: same algorithm comparison (wyhash vs wyhash)
+      speedup: +(jsWyhashMs / mojoMs).toFixed(1),
     });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
   }
-});
 
-// --- API: Matrix Multiply ---------------------------------------------------
+  return { results };
+}
 
-app.get('/api/matmul/demo', (req, res) => {
+// --- Startup: compute all demos, then listen --------------------------------
+
+async function startup() {
+  console.log('Computing demo results (this takes ~15-30s)...');
+  const t0 = performance.now();
+
   try {
-    const SIZE = 512;
-    const a = new Float64Array(SIZE * SIZE);
-    const b = new Float64Array(SIZE * SIZE);
-    for (let i = 0; i < SIZE * SIZE; i++) {
-      a[i] = Math.random();
-      b[i] = Math.random();
-    }
-
-    const results = {};
-
-    // JS baseline (naive) — same warmup/iter pattern for fair timing
-    const cJs = new Float64Array(SIZE * SIZE);
-    results.jsNaiveMs = bench(() => jsMatmulNaive(a, b, cJs, SIZE, SIZE, SIZE), 1, 3);
-
-    // Mojo naive
-    const c1 = new Float64Array(SIZE * SIZE);
-    results.naiveMs = bench(() => matmulAddon.matmulNaive(a, b, c1, SIZE, SIZE, SIZE), 1, 3);
-
-    // Mojo vectorized
-    const c2 = new Float64Array(SIZE * SIZE);
-    results.vectorizedMs = bench(() => matmulAddon.matmulVectorized(a, b, c2, SIZE, SIZE, SIZE), 1, 5);
-
-    // Mojo tiled
-    const c3 = new Float64Array(SIZE * SIZE);
-    results.tiledMs = bench(() => matmulAddon.matmulTiled(a, b, c3, SIZE, SIZE, SIZE), 1, 5);
-
-    // Mojo parallel
-    const c4 = new Float64Array(SIZE * SIZE);
-    results.parallelMs = bench(() => matmulAddon.matmulParallel(a, b, c4, SIZE, SIZE, SIZE), 2, 10);
-
-    results.size = SIZE;
-
-    res.json(results);
+    cache.image = await computeImageDemo();
+    console.log('  Image demo cached');
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('  Image demo failed:', err.message);
   }
-});
 
-// --- API: Wyhash ------------------------------------------------------------
-
-app.get('/api/hash/demo', (req, res) => {
   try {
-    const sizes = [1024, 65536, 1048576, 16777216];
-    const results = [];
-
-    for (const size of sizes) {
-      const buf = Buffer.alloc(size);
-      for (let i = 0; i < size; i++) buf[i] = (i * 7 + 13) & 0xFF;
-
-      const iters = size <= 65536 ? 1000 : size <= 1048576 ? 100 : 10;
-      const mojoMs = bench(() => hashAddon.wyHash64(buf), 3, iters);
-      // Same algorithm (wyhash) in JS BigInt — apples-to-apples comparison
-      const jsWyhashMs = bench(() => jsWyhash(buf), 3, Math.max(1, Math.floor(iters / 10)));
-      // Also show FNV-1a as a "best JS can do with Number arithmetic" reference
-      const jsFnvMs = bench(() => jsFnv1a(buf), 3, iters);
-
-      const mojoGBs = (size / 1e9) / (mojoMs / 1000);
-      const jsWyhashGBs = (size / 1e9) / (jsWyhashMs / 1000);
-      const jsFnvGBs = (size / 1e9) / (jsFnvMs / 1000);
-
-      results.push({
-        size,
-        sizeLabel: size >= 1048576 ? `${size / 1048576}MB` : `${size / 1024}KB`,
-        mojoMs: +mojoMs.toFixed(4),
-        jsWyhashMs: +jsWyhashMs.toFixed(4),
-        jsFnvMs: +jsFnvMs.toFixed(4),
-        mojoGBs: +mojoGBs.toFixed(2),
-        jsWyhashGBs: +jsWyhashGBs.toFixed(2),
-        jsFnvGBs: +jsFnvGBs.toFixed(2),
-        // Primary speedup: same algorithm comparison (wyhash vs wyhash)
-        speedup: +(jsWyhashMs / mojoMs).toFixed(1),
-      });
-    }
-
-    res.json({ results });
+    cache.stats = computeStatsDemo();
+    console.log('  Stats demo cached');
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('  Stats demo failed:', err.message);
   }
-});
+
+  try {
+    cache.search = computeSearchDemo();
+    console.log('  Search demo cached');
+  } catch (err) {
+    console.error('  Search demo failed:', err.message);
+  }
+
+  try {
+    cache.matmul = computeMatmulDemo();
+    console.log('  Matmul demo cached');
+  } catch (err) {
+    console.error('  Matmul demo failed:', err.message);
+  }
+
+  try {
+    cache.hash = computeHashDemo();
+    console.log('  Hash demo cached');
+  } catch (err) {
+    console.error('  Hash demo failed:', err.message);
+  }
+
+  const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+  console.log(`All demos cached in ${elapsed}s, ready to serve`);
+
+  app.listen(PORT, () => {
+    console.log(`Mojo addon demo running at http://localhost:${PORT}`);
+  });
+}
+
+// --- API endpoints (serve cached results) -----------------------------------
+
+function serveCache(key) {
+  return (req, res) => {
+    if (!cache[key]) {
+      return res.status(503).json({ error: 'Demo is warming up, try again shortly' });
+    }
+    res.json(cache[key]);
+  };
+}
+
+app.get('/api/image/demo', serveCache('image'));
+app.get('/api/stats/demo', serveCache('stats'));
+app.get('/api/search/demo', serveCache('search'));
+app.get('/api/matmul/demo', serveCache('matmul'));
+app.get('/api/hash/demo', serveCache('hash'));
 
 // --- Start ------------------------------------------------------------------
 
-app.listen(PORT, () => {
-  console.log(`Mojo addon demo running at http://localhost:${PORT}`);
-});
+startup();
