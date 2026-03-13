@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mojo Addon Examples — Live Demo</title>
+  <meta name="description" content="High-performance Node.js native addons built with Mojo. See SIMD vectorization and multi-core parallelism in action.">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="site-header">
+    <div class="container">
+      <a href="/" class="site-title">mojo-addon-examples</a>
+      <div class="header-links">
+        <a href="https://github.com/codetalcott/mojo-addon-examples" class="hide-mobile">GitHub</a>
+        <a href="https://www.npmjs.com/package/napi-mojo" class="hide-mobile">napi-mojo</a>
+        <button id="dark-mode-btn" aria-label="Toggle dark mode">
+          <span class="light-icon">&#9789;</span>
+          <span class="dark-icon" style="display:none">&#9788;</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero container">
+    <h1>Native Performance in Node.js</h1>
+    <p>
+      Five practical examples showing what Mojo's SIMD vectorization and
+      multi-core parallelism can do for your Node.js workloads —
+      from image processing to statistical analysis.
+    </p>
+    <div class="hero-links">
+      <a href="https://github.com/codetalcott/mojo-addon-examples" class="btn-primary">View Source</a>
+      <a href="https://www.npmjs.com/package/napi-mojo" class="btn-secondary">napi-mojo on npm</a>
+    </div>
+  </section>
+
+  <!-- Demo Sections -->
+  <main class="container demo-sections">
+
+    <!-- 1. Image Processing -->
+    <section class="demo-section" id="image">
+      <div class="section-header">
+        <h2>Instant Photo Processing</h2>
+        <p>Four pixel transforms on a 640x480 RGBA image — grayscale, brightness, threshold, and box blur — each running with parallel multi-core dispatch.</p>
+      </div>
+      <div class="demo-result" id="image-result">
+        <div class="loading">Running image transforms...</div>
+      </div>
+      <div class="code-section">
+        <button class="code-toggle" onclick="toggleCode('image-code')">View Mojo Source</button>
+        <div class="code-block" id="image-code">
+          <pre><code class="language-mojo">fn _grayscale_parallel(
+    src: UnsafePointer[Byte, MutAnyOrigin],
+    dst: UnsafePointer[Byte, MutAnyOrigin],
+    width: Int, height: Int,
+):
+    var rows_per = height // NUM_WORKERS
+    fn worker(wid: Int) capturing:
+        var s = wid * rows_per
+        var e = s + rows_per if wid < NUM_WORKERS - 1 else height
+        _grayscale_rows(src, dst, s, e, width)
+    parallelize[worker](NUM_WORKERS)</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Statistics -->
+    <section class="demo-section" id="stats">
+      <div class="section-header">
+        <h2>One Million Numbers, One Call</h2>
+        <p>Compute mean, stddev, min, max, and percentiles across 1M random Float64 values — with a 50-bin histogram — in a single Mojo call.</p>
+      </div>
+      <div class="demo-result" id="stats-result">
+        <div class="loading">Computing statistics...</div>
+      </div>
+      <div class="code-section">
+        <button class="code-toggle" onclick="toggleCode('stats-code')">View Mojo Source</button>
+        <div class="code-block" id="stats-code">
+          <pre><code class="language-mojo">fn _stats_kernel(
+    data: UnsafePointer[Float64, MutAnyOrigin],
+    n: Int,
+) -> StatResult:
+    var sum: Float64 = 0.0
+    var min_val = data[0]
+    var max_val = data[0]
+
+    # SIMD reduction: process 4 Float64s per cycle
+    fn reduce[width: Int](i: Int) unified {mut}:
+        var chunk = data.load[width=width](i)
+        sum += chunk.reduce_add()
+        min_val = min(min_val, chunk.reduce_min())
+        max_val = max(max_val, chunk.reduce_max())
+    vectorize[simd_width_of[DType.float64]()](n, reduce)</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. SIMD Search -->
+    <section class="demo-section" id="search">
+      <div class="section-header">
+        <h2>Scan 16MB in Microseconds</h2>
+        <p>SIMD byte-level pattern matching on a 16MB buffer — count newlines and find all occurrences of "ERROR" — processing 64 bytes per CPU cycle.</p>
+      </div>
+      <div class="demo-result" id="search-result">
+        <div class="loading">Scanning buffer...</div>
+      </div>
+      <div class="code-section">
+        <button class="code-toggle" onclick="toggleCode('search-code')">View Mojo Source</button>
+        <div class="code-block" id="search-code">
+          <pre><code class="language-mojo">fn _count_byte_simd(
+    data: UnsafePointer[Byte, MutAnyOrigin],
+    n: Int, target: Byte,
+) -> Int:
+    var count: Int = 0
+    # Compare 64 bytes at once using SIMD
+    fn scan[width: Int](i: Int) unified {mut}:
+        var chunk = data.load[width=width](i)
+        var matches = chunk == SIMD[DType.uint8, width](target)
+        count += Int(matches.cast[DType.uint8]().reduce_add())
+    vectorize[64](n, scan)
+    return count</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Matrix Multiply -->
+    <section class="demo-section" id="matmul">
+      <div class="section-header">
+        <h2>The Optimization Ladder</h2>
+        <p>512x512 matrix multiplication through four stages — naive loops, SIMD vectorization, cache tiling, and multi-core parallelism — showing the cumulative speedup at each step.</p>
+      </div>
+      <div class="demo-result" id="matmul-result">
+        <div class="loading">Running matrix multiplications...</div>
+      </div>
+      <div class="code-section">
+        <button class="code-toggle" onclick="toggleCode('matmul-code')">View Mojo Source</button>
+        <div class="code-block" id="matmul-code">
+          <pre><code class="language-mojo"># SIMD vectorized inner loop — process multiple columns at once
+fn _matmul_vectorized(a, b, c, M, K, N):
+    for i in range(M):
+        var row_c = i * N
+        for p in range(K):
+            var a_ip = a[i * K + p]
+            var row_b = p * N
+            fn compute[width: Int](j: Int) unified {mut}:
+                var b_chunk = b.load[width=width](row_b + j)
+                var c_chunk = c.load[width=width](row_c + j)
+                c.store[width=width](row_c + j, c_chunk + a_ip * b_chunk)
+            vectorize[simd_width_of[DType.float64]()](N, compute)</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Wyhash -->
+    <section class="demo-section" id="hash">
+      <div class="section-header">
+        <h2>Hash at Wire Speed</h2>
+        <p>Non-cryptographic 64-bit hashing (wyhash) at multiple buffer sizes — showing throughput in GB/s as buffer size grows and Mojo's register-level optimization shines.</p>
+      </div>
+      <div class="demo-result" id="hash-result">
+        <div class="loading">Running hash benchmarks...</div>
+      </div>
+      <div class="code-section">
+        <button class="code-toggle" onclick="toggleCode('hash-code')">View Mojo Source</button>
+        <div class="code-block" id="hash-code">
+          <pre><code class="language-mojo"># 48-byte main loop — process 3 x 16-byte blocks per iteration
+fn _wyhash_core(data: UnsafePointer[Byte, MutAnyOrigin],
+                len: Int, seed: UInt64) -> UInt64:
+    var see1 = seed
+    var see2 = seed
+    var p = 0
+    while len - p > 48:
+        seed = wymum(wyr8(data, p) ^ WYP1, wyr8(data, p + 8) ^ seed)
+        see1 = wymum(wyr8(data, p + 16) ^ WYP2, wyr8(data, p + 24) ^ see1)
+        see2 = wymum(wyr8(data, p + 32) ^ WYP3, wyr8(data, p + 40) ^ see2)
+        p += 48
+    return wymum(WYP1 ^ UInt64(len), wymum(a ^ WYP1, b ^ seed))</code></pre>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      Built with <a href="https://www.npmjs.com/package/napi-mojo">napi-mojo</a> —
+      <a href="https://github.com/codetalcott/mojo-addon-examples">Source on GitHub</a>
+    </div>
+  </footer>
+
+  <!-- Prism.js for syntax highlighting (core only, loaded from CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="/prism-mojo.js"></script>
+  <script src="/demo.js"></script>
+
+</body>
+</html>
