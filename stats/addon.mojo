@@ -7,10 +7,10 @@
 ## Build:  pixi run bash stats/build.sh
 ## Run:    node stats/stats.js
 
-from algorithm.functional import vectorize, parallelize
-from sys import simd_width_of
-from math import sqrt
-from memory import alloc
+from std.algorithm.functional import vectorize, parallelize
+from std.sys import simd_width_of
+from std.math import sqrt
+from std.memory import alloc
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error

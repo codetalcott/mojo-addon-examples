@@ -12,9 +12,9 @@
 ## Build:  pixi run bash matmul/build.sh
 ## Run:    node matmul/matmul.js
 
-from algorithm.functional import vectorize, parallelize
-from sys import simd_width_of
-from memory import alloc
+from std.algorithm.functional import vectorize, parallelize
+from std.sys import simd_width_of
+from std.memory import alloc
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error

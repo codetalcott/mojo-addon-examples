@@ -9,8 +9,8 @@
 ## Build:  pixi run bash image/build.sh
 ## Run:    node image/image.js
 
-from algorithm.functional import parallelize
-from memory import alloc
+from std.algorithm.functional import parallelize
+from std.memory import alloc
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error

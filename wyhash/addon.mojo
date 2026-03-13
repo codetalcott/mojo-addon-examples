@@ -7,7 +7,7 @@
 ## Build:  pixi run bash wyhash/build.sh
 ## Run:    node wyhash/hash.js
 
-from memory import bitcast, alloc
+from std.memory import bitcast, alloc
 
 from napi.types import NapiEnv, NapiValue, NAPI_TYPE_NUMBER, NAPI_TYPE_BIGINT
 from napi.error import throw_js_error
@@ -40,12 +40,12 @@ fn _wymum(a: UInt64, b: UInt64) -> UInt64:
 
 fn _wyr8(p: UnsafePointer[Byte, MutAnyOrigin], offset: Int) -> UInt64:
     """Read 8 bytes as little-endian UInt64."""
-    return p.offset(offset).bitcast[UInt64]()[]
+    return (p + offset).bitcast[UInt64]()[]
 
 
 fn _wyr4(p: UnsafePointer[Byte, MutAnyOrigin], offset: Int) -> UInt64:
     """Read 4 bytes as little-endian UInt32, zero-extend to UInt64."""
-    return UInt64(p.offset(offset).bitcast[UInt32]()[])
+    return UInt64((p + offset).bitcast[UInt32]()[])
 
 
 fn _wyr3(p: UnsafePointer[Byte, MutAnyOrigin], k: Int, length: Int) -> UInt64:

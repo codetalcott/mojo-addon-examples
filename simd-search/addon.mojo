@@ -8,9 +8,9 @@
 ## Build:  pixi run bash simd-search/build.sh
 ## Run:    node simd-search/search.js
 
-from algorithm.functional import vectorize, parallelize
-from sys import simd_width_of
-from memory import alloc
+from std.algorithm.functional import vectorize, parallelize
+from std.sys import simd_width_of
+from std.memory import alloc
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error
