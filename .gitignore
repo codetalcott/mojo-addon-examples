@@ -6,3 +6,7 @@ build/
 .pixi/
 .claude/
 .fly/
+.agents/
+skills/
+skills-lock.json
+grail.yaml
