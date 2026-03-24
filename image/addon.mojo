@@ -9,7 +9,8 @@
 ## Build:  pixi run bash image/build.sh
 ## Run:    node image/image.js
 
-from std.algorithm.functional import parallelize
+from std.algorithm.functional import parallelize, vectorize
+from std.sys import simd_width_of
 from std.memory import alloc
 
 from napi.types import NapiEnv, NapiValue
@@ -29,25 +30,26 @@ comptime NUM_WORKERS = 4
 
 # --- Grayscale kernel ---------------------------------------------------------
 # Integer approximation: gray = (77*R + 150*G + 29*B) >> 8
-# Max value = 77*255 + 150*255 + 29*255 = 65280 — fits UInt16
+# Treats each RGBA pixel as a UInt32 lane — extract R/G/B via shifts, pack back.
 
 def _grayscale_rows(
     src: UnsafePointer[Byte, MutAnyOrigin],
     dst: UnsafePointer[Byte, MutAnyOrigin],
     start_row: Int, end_row: Int, width: Int,
 ):
-    for row in range(start_row, end_row):
-        var row_offset = row * width * 4
-        for x in range(width):
-            var off = row_offset + x * 4
-            var r = UInt16(src[off])
-            var g = UInt16(src[off + 1])
-            var b = UInt16(src[off + 2])
-            var gray = Byte((77 * r + 150 * g + 29 * b) >> 8)
-            dst[off] = gray
-            dst[off + 1] = gray
-            dst[off + 2] = gray
-            dst[off + 3] = src[off + 3]
+    var src32 = src.bitcast[UInt32]()
+    var dst32 = dst.bitcast[UInt32]()
+    var base = start_row * width
+    var num_pixels = (end_row - start_row) * width
+    def compute[w: Int](offset: Int) unified {mut}:
+        var pixels = src32.load[width=w](base + offset)
+        var r = pixels & SIMD[DType.uint32, w](0xFF)
+        var g = (pixels >> 8) & SIMD[DType.uint32, w](0xFF)
+        var b_ch = (pixels >> 16) & SIMD[DType.uint32, w](0xFF)
+        var a = pixels & SIMD[DType.uint32, w](0xFF000000)
+        var gray = (77 * r + 150 * g + 29 * b_ch) >> 8
+        dst32.store[width=w](base + offset, gray | (gray << 8) | (gray << 16) | a)
+    vectorize[simd_width_of[DType.uint32]()](num_pixels, compute)
 
 
 def _grayscale_parallel(
@@ -64,8 +66,8 @@ def _grayscale_parallel(
 
 
 # --- Brightness kernel --------------------------------------------------------
-# Fixed-point: factor_fp = UInt16(factor * 256)
-# Per byte: min(255, (byte * factor_fp) >> 8)
+# Fixed-point multiply: factor_fp = UInt32(factor * 256), result = (ch * fp) >> 8
+# SIMD clamp replaces per-byte branch.
 
 def _brightness_rows(
     src: UnsafePointer[Byte, MutAnyOrigin],
@@ -73,16 +75,22 @@ def _brightness_rows(
     start_row: Int, end_row: Int, width: Int,
     factor_fp: UInt32,
 ):
-    for row in range(start_row, end_row):
-        var row_offset = row * width * 4
-        for x in range(width):
-            var off = row_offset + x * 4
-            for c in range(3):
-                var val = (UInt32(src[off + c]) * factor_fp) >> 8
-                if val > 255:
-                    val = 255
-                dst[off + c] = Byte(val)
-            dst[off + 3] = src[off + 3]
+    var src32 = src.bitcast[UInt32]()
+    var dst32 = dst.bitcast[UInt32]()
+    var base = start_row * width
+    var num_pixels = (end_row - start_row) * width
+    def compute[w: Int](offset: Int) unified {mut}:
+        var pixels = src32.load[width=w](base + offset)
+        var r = pixels & SIMD[DType.uint32, w](0xFF)
+        var g = (pixels >> 8) & SIMD[DType.uint32, w](0xFF)
+        var b_ch = (pixels >> 16) & SIMD[DType.uint32, w](0xFF)
+        var a = pixels & SIMD[DType.uint32, w](0xFF000000)
+        var fp = SIMD[DType.uint32, w](factor_fp)
+        var nr = ((r * fp) >> 8).clamp(0, 255)
+        var ng = ((g * fp) >> 8).clamp(0, 255)
+        var nb = ((b_ch * fp) >> 8).clamp(0, 255)
+        dst32.store[width=w](base + offset, nr | (ng << 8) | (nb << 16) | a)
+    vectorize[simd_width_of[DType.uint32]()](num_pixels, compute)
 
 
 def _brightness_parallel(
@@ -99,7 +107,7 @@ def _brightness_parallel(
 
 
 # --- Threshold kernel ---------------------------------------------------------
-# Grayscale then compare: output 0 or 255 for RGB, preserve alpha
+# Grayscale then compare: SIMD select outputs 0x00FFFFFF or 0x000000, preserve alpha.
 
 def _threshold_rows(
     src: UnsafePointer[Byte, MutAnyOrigin],
@@ -107,19 +115,23 @@ def _threshold_rows(
     start_row: Int, end_row: Int, width: Int,
     thresh: Byte,
 ):
-    for row in range(start_row, end_row):
-        var row_offset = row * width * 4
-        for x in range(width):
-            var off = row_offset + x * 4
-            var r = UInt16(src[off])
-            var g = UInt16(src[off + 1])
-            var b = UInt16(src[off + 2])
-            var gray = Byte((77 * r + 150 * g + 29 * b) >> 8)
-            var out_val = Byte(255) if gray >= thresh else Byte(0)
-            dst[off] = out_val
-            dst[off + 1] = out_val
-            dst[off + 2] = out_val
-            dst[off + 3] = src[off + 3]
+    var src32 = src.bitcast[UInt32]()
+    var dst32 = dst.bitcast[UInt32]()
+    var base = start_row * width
+    var num_pixels = (end_row - start_row) * width
+    def compute[w: Int](offset: Int) unified {mut}:
+        var pixels = src32.load[width=w](base + offset)
+        var r = pixels & SIMD[DType.uint32, w](0xFF)
+        var g = (pixels >> 8) & SIMD[DType.uint32, w](0xFF)
+        var b_ch = (pixels >> 16) & SIMD[DType.uint32, w](0xFF)
+        var a = pixels & SIMD[DType.uint32, w](0xFF000000)
+        var gray = (77 * r + 150 * g + 29 * b_ch) >> 8
+        # Branchless: (gray - thresh) wraps to large uint32 if gray < thresh,
+        # so bit 31 is set. Shift it down to get 0 (above) or 1 (below).
+        var below = (gray - SIMD[DType.uint32, w](UInt32(thresh))) >> 31
+        var rgb = (SIMD[DType.uint32, w](1) - below) * SIMD[DType.uint32, w](0x00FFFFFF)
+        dst32.store[width=w](base + offset, rgb | a)
+    vectorize[simd_width_of[DType.uint32]()](num_pixels, compute)
 
 
 def _threshold_parallel(
@@ -137,7 +149,7 @@ def _threshold_parallel(
 
 # --- Blur kernel --------------------------------------------------------------
 # Separable box blur: horizontal pass + vertical pass
-# Each pass uses a sliding window sum with UInt32 accumulator
+# Uses SIMD[uint32, 4] to process all 4 RGBA channels in parallel per pixel.
 # Edge handling: clamp indices to [0, dim-1]
 
 def _blur_horizontal_rows(
@@ -146,35 +158,33 @@ def _blur_horizontal_rows(
     start_row: Int, end_row: Int, width: Int, radius: Int,
 ):
     var diameter = 2 * radius + 1
+    var diam = SIMD[DType.uint32, 4](UInt32(diameter))
     for row in range(start_row, end_row):
-        var row_offset = row * width * 4
-        for c in range(4):
-            # Initialize running sum for first pixel
-            var running_sum: UInt32 = 0
-            for dx in range(-radius, radius + 1):
-                var sx = dx
-                if sx < 0:
-                    sx = 0
-                if sx >= width:
-                    sx = width - 1
-                running_sum += UInt32(src[row_offset + sx * 4 + c])
-            dst[row_offset + c] = Byte(running_sum // UInt32(diameter))
+        var row_off = row * width * 4
+        # Initialize running sum for first pixel — all 4 channels at once
+        var running_sum = SIMD[DType.uint32, 4](0)
+        for dx in range(-radius, radius + 1):
+            var sx = dx
+            if sx < 0:
+                sx = 0
+            if sx >= width:
+                sx = width - 1
+            running_sum += src.load[width=4](row_off + sx * 4).cast[DType.uint32]()
+        dst.store[width=4](row_off, (running_sum // diam).cast[DType.uint8]())
 
-            # Slide window across row
-            for x in range(1, width):
-                # Add right edge
-                var add_x = x + radius
-                if add_x >= width:
-                    add_x = width - 1
-                running_sum += UInt32(src[row_offset + add_x * 4 + c])
+        # Slide window across row
+        for x in range(1, width):
+            var add_x = x + radius
+            if add_x >= width:
+                add_x = width - 1
+            running_sum += src.load[width=4](row_off + add_x * 4).cast[DType.uint32]()
 
-                # Remove left edge
-                var rem_x = x - radius - 1
-                if rem_x < 0:
-                    rem_x = 0
-                running_sum -= UInt32(src[row_offset + rem_x * 4 + c])
+            var rem_x = x - radius - 1
+            if rem_x < 0:
+                rem_x = 0
+            running_sum -= src.load[width=4](row_off + rem_x * 4).cast[DType.uint32]()
 
-                dst[row_offset + x * 4 + c] = Byte(running_sum // UInt32(diameter))
+            dst.store[width=4](row_off + x * 4, (running_sum // diam).cast[DType.uint8]())
 
 
 def _blur_vertical_cols(
@@ -183,32 +193,33 @@ def _blur_vertical_cols(
     start_col: Int, end_col: Int, width: Int, height: Int, radius: Int,
 ):
     var diameter = 2 * radius + 1
+    var diam = SIMD[DType.uint32, 4](UInt32(diameter))
     for col in range(start_col, end_col):
-        for c in range(4):
-            # Initialize running sum for first pixel
-            var running_sum: UInt32 = 0
-            for dy in range(-radius, radius + 1):
-                var sy = dy
-                if sy < 0:
-                    sy = 0
-                if sy >= height:
-                    sy = height - 1
-                running_sum += UInt32(src[sy * width * 4 + col * 4 + c])
-            dst[col * 4 + c] = Byte(running_sum // UInt32(diameter))
+        var col_off = col * 4
+        # Initialize running sum for first pixel — all 4 channels at once
+        var running_sum = SIMD[DType.uint32, 4](0)
+        for dy in range(-radius, radius + 1):
+            var sy = dy
+            if sy < 0:
+                sy = 0
+            if sy >= height:
+                sy = height - 1
+            running_sum += src.load[width=4](sy * width * 4 + col_off).cast[DType.uint32]()
+        dst.store[width=4](col_off, (running_sum // diam).cast[DType.uint8]())
 
-            # Slide window down column
-            for y in range(1, height):
-                var add_y = y + radius
-                if add_y >= height:
-                    add_y = height - 1
-                running_sum += UInt32(src[add_y * width * 4 + col * 4 + c])
+        # Slide window down column
+        for y in range(1, height):
+            var add_y = y + radius
+            if add_y >= height:
+                add_y = height - 1
+            running_sum += src.load[width=4](add_y * width * 4 + col_off).cast[DType.uint32]()
 
-                var rem_y = y - radius - 1
-                if rem_y < 0:
-                    rem_y = 0
-                running_sum -= UInt32(src[rem_y * width * 4 + col * 4 + c])
+            var rem_y = y - radius - 1
+            if rem_y < 0:
+                rem_y = 0
+            running_sum -= src.load[width=4](rem_y * width * 4 + col_off).cast[DType.uint32]()
 
-                dst[y * width * 4 + col * 4 + c] = Byte(running_sum // UInt32(diameter))
+            dst.store[width=4](y * width * 4 + col_off, (running_sum // diam).cast[DType.uint8]())
 
 
 def _blur_parallel(
