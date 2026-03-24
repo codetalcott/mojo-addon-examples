@@ -31,7 +31,7 @@ comptime NUM_WORKERS = 4
 # Integer approximation: gray = (77*R + 150*G + 29*B) >> 8
 # Max value = 77*255 + 150*255 + 29*255 = 65280 — fits UInt16
 
-fn _grayscale_rows(
+def _grayscale_rows(
     src: UnsafePointer[Byte, MutAnyOrigin],
     dst: UnsafePointer[Byte, MutAnyOrigin],
     start_row: Int, end_row: Int, width: Int,
@@ -50,13 +50,13 @@ fn _grayscale_rows(
             dst[off + 3] = src[off + 3]
 
 
-fn _grayscale_parallel(
+def _grayscale_parallel(
     src: UnsafePointer[Byte, MutAnyOrigin],
     dst: UnsafePointer[Byte, MutAnyOrigin],
     width: Int, height: Int,
 ):
     var rows_per = height // NUM_WORKERS
-    fn worker(wid: Int) capturing:
+    def worker(wid: Int) capturing:
         var s = wid * rows_per
         var e = s + rows_per if wid < NUM_WORKERS - 1 else height
         _grayscale_rows(src, dst, s, e, width)
@@ -67,7 +67,7 @@ fn _grayscale_parallel(
 # Fixed-point: factor_fp = UInt16(factor * 256)
 # Per byte: min(255, (byte * factor_fp) >> 8)
 
-fn _brightness_rows(
+def _brightness_rows(
     src: UnsafePointer[Byte, MutAnyOrigin],
     dst: UnsafePointer[Byte, MutAnyOrigin],
     start_row: Int, end_row: Int, width: Int,
@@ -85,13 +85,13 @@ fn _brightness_rows(
             dst[off + 3] = src[off + 3]
 
 
-fn _brightness_parallel(
+def _brightness_parallel(
     src: UnsafePointer[Byte, MutAnyOrigin],
     dst: UnsafePointer[Byte, MutAnyOrigin],
     width: Int, height: Int, factor_fp: UInt32,
 ):
     var rows_per = height // NUM_WORKERS
-    fn worker(wid: Int) capturing:
+    def worker(wid: Int) capturing:
         var s = wid * rows_per
         var e = s + rows_per if wid < NUM_WORKERS - 1 else height
         _brightness_rows(src, dst, s, e, width, factor_fp)
@@ -101,7 +101,7 @@ fn _brightness_parallel(
 # --- Threshold kernel ---------------------------------------------------------
 # Grayscale then compare: output 0 or 255 for RGB, preserve alpha
 
-fn _threshold_rows(
+def _threshold_rows(
     src: UnsafePointer[Byte, MutAnyOrigin],
     dst: UnsafePointer[Byte, MutAnyOrigin],
     start_row: Int, end_row: Int, width: Int,
@@ -122,13 +122,13 @@ fn _threshold_rows(
             dst[off + 3] = src[off + 3]
 
 
-fn _threshold_parallel(
+def _threshold_parallel(
     src: UnsafePointer[Byte, MutAnyOrigin],
     dst: UnsafePointer[Byte, MutAnyOrigin],
     width: Int, height: Int, thresh: Byte,
 ):
     var rows_per = height // NUM_WORKERS
-    fn worker(wid: Int) capturing:
+    def worker(wid: Int) capturing:
         var s = wid * rows_per
         var e = s + rows_per if wid < NUM_WORKERS - 1 else height
         _threshold_rows(src, dst, s, e, width, thresh)
@@ -140,7 +140,7 @@ fn _threshold_parallel(
 # Each pass uses a sliding window sum with UInt32 accumulator
 # Edge handling: clamp indices to [0, dim-1]
 
-fn _blur_horizontal_rows(
+def _blur_horizontal_rows(
     src: UnsafePointer[Byte, MutAnyOrigin],
     dst: UnsafePointer[Byte, MutAnyOrigin],
     start_row: Int, end_row: Int, width: Int, radius: Int,
@@ -177,7 +177,7 @@ fn _blur_horizontal_rows(
                 dst[row_offset + x * 4 + c] = Byte(running_sum // UInt32(diameter))
 
 
-fn _blur_vertical_cols(
+def _blur_vertical_cols(
     src: UnsafePointer[Byte, MutAnyOrigin],
     dst: UnsafePointer[Byte, MutAnyOrigin],
     start_col: Int, end_col: Int, width: Int, height: Int, radius: Int,
@@ -211,7 +211,7 @@ fn _blur_vertical_cols(
                 dst[y * width * 4 + col * 4 + c] = Byte(running_sum // UInt32(diameter))
 
 
-fn _blur_parallel(
+def _blur_parallel(
     src: UnsafePointer[Byte, MutAnyOrigin],
     dst: UnsafePointer[Byte, MutAnyOrigin],
     width: Int, height: Int, radius: Int,
@@ -221,7 +221,7 @@ fn _blur_parallel(
 
     # Horizontal pass: src → temp, parallelize across rows
     var rows_per = height // NUM_WORKERS
-    fn h_worker(wid: Int) capturing:
+    def h_worker(wid: Int) capturing:
         var s = wid * rows_per
         var e = s + rows_per if wid < NUM_WORKERS - 1 else height
         _blur_horizontal_rows(src, temp, s, e, width, radius)
@@ -229,7 +229,7 @@ fn _blur_parallel(
 
     # Vertical pass: temp → dst, parallelize across columns
     var cols_per = width // NUM_WORKERS
-    fn v_worker(wid: Int) capturing:
+    def v_worker(wid: Int) capturing:
         var s = wid * cols_per
         var e = s + cols_per if wid < NUM_WORKERS - 1 else width
         _blur_vertical_cols(temp, dst, s, e, width, height, radius)
@@ -240,7 +240,7 @@ fn _blur_parallel(
 
 # --- N-API callbacks ----------------------------------------------------------
 
-fn grayscale_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def grayscale_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var bindings = CbArgs.get_bindings(env, info)
         var args = CbArgs.get_three(bindings, env, info)
@@ -259,7 +259,7 @@ fn grayscale_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return NapiValue()
 
 
-fn brightness_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def brightness_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var bindings = CbArgs.get_bindings(env, info)
         var args = CbArgs.get_four(bindings, env, info)
@@ -280,7 +280,7 @@ fn brightness_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return NapiValue()
 
 
-fn threshold_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def threshold_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var bindings = CbArgs.get_bindings(env, info)
         var args = CbArgs.get_four(bindings, env, info)
@@ -300,7 +300,7 @@ fn threshold_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return NapiValue()
 
 
-fn blur_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def blur_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var bindings = CbArgs.get_bindings(env, info)
         var args = CbArgs.get_four(bindings, env, info)
@@ -323,7 +323,7 @@ fn blur_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 # --- Module entry point -------------------------------------------------------
 
 @export("napi_register_module_v1", ABI="C")
-fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
         init_async_runtime()
     except:

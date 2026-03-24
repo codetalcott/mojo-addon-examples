@@ -30,7 +30,7 @@ from napi.framework.runtime import init_async_runtime
 # --- Helper: extract matmul args from JS -------------------------------------
 # Args: (a: Float64Array, b: Float64Array, result: Float64Array, M: int, K: int, N: int)
 
-fn parse_matmul_args(b: Bindings, env: NapiEnv, info: NapiValue) raises -> InlineArray[
+def parse_matmul_args(b: Bindings, env: NapiEnv, info: NapiValue) raises -> InlineArray[
     UnsafePointer[Float64, MutAnyOrigin], 3
 ]:
     var argc = CbArgs.argc(b, env, info)
@@ -50,7 +50,7 @@ fn parse_matmul_args(b: Bindings, env: NapiEnv, info: NapiValue) raises -> Inlin
     ptrs[2] = ptr_out
     return ptrs^
 
-fn parse_dims(b: Bindings, env: NapiEnv, info: NapiValue) raises -> InlineArray[Int, 3]:
+def parse_dims(b: Bindings, env: NapiEnv, info: NapiValue) raises -> InlineArray[Int, 3]:
     var argv_buf = alloc[NapiValue](6)
     CbArgs.get_argv(b, env, info, 6, argv_buf)
     var M = Int(JsInt32.from_napi_value(b, env, argv_buf[3]))
@@ -65,7 +65,7 @@ fn parse_dims(b: Bindings, env: NapiEnv, info: NapiValue) raises -> InlineArray[
 
 # --- 1. Naive: triple loop ---------------------------------------------------
 
-fn _matmul_naive(
+def _matmul_naive(
     a: UnsafePointer[Float64, MutAnyOrigin],
     b: UnsafePointer[Float64, MutAnyOrigin],
     c: UnsafePointer[Float64, MutAnyOrigin],
@@ -79,7 +79,7 @@ fn _matmul_naive(
             c[i * N + j] = sum
 
 
-fn matmul_naive_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def matmul_naive_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var bindings = CbArgs.get_bindings(env, info)
         var ptrs = parse_matmul_args(bindings, env, info)
@@ -95,7 +95,7 @@ fn matmul_naive_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 # Reorder to i,k,j (row-of-B access pattern) so the inner j-loop is contiguous
 # and can be vectorized. Each SIMD lane processes multiple j values at once.
 
-fn _matmul_vectorized(
+def _matmul_vectorized(
     a: UnsafePointer[Float64, MutAnyOrigin],
     b: UnsafePointer[Float64, MutAnyOrigin],
     c: UnsafePointer[Float64, MutAnyOrigin],
@@ -108,14 +108,14 @@ fn _matmul_vectorized(
         for p in range(K):
             var a_ip = a[i * K + p]
             var row_b = p * N
-            fn compute[width: Int](j: Int) unified {mut}:
+            def compute[width: Int](j: Int) unified {mut}:
                 var b_chunk = b.load[width=width](row_b + j)
                 var c_chunk = c.load[width=width](row_c + j)
                 c.store[width=width](row_c + j, c_chunk + a_ip * b_chunk)
             vectorize[simd_width_of[DType.float64]()](N, compute)
 
 
-fn matmul_vectorized_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def matmul_vectorized_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var bindings = CbArgs.get_bindings(env, info)
         var ptrs = parse_matmul_args(bindings, env, info)
@@ -133,7 +133,7 @@ fn matmul_vectorized_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 comptime TILE_SIZE = 64
 
-fn _matmul_tiled(
+def _matmul_tiled(
     a: UnsafePointer[Float64, MutAnyOrigin],
     b: UnsafePointer[Float64, MutAnyOrigin],
     c: UnsafePointer[Float64, MutAnyOrigin],
@@ -156,7 +156,7 @@ fn _matmul_tiled(
                     for p in range(pp, p_end):
                         var a_ip = a[i * K + p]
                         var row_b = p * N + jj
-                        fn compute[width: Int](j: Int) unified {mut}:
+                        def compute[width: Int](j: Int) unified {mut}:
                             var b_chunk = b.load[width=width](row_b + j)
                             var c_chunk = c.load[width=width](row_c + j)
                             c.store[width=width](row_c + j, c_chunk + a_ip * b_chunk)
@@ -166,7 +166,7 @@ fn _matmul_tiled(
         ii += TILE_SIZE
 
 
-fn matmul_tiled_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def matmul_tiled_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var bindings = CbArgs.get_bindings(env, info)
         var ptrs = parse_matmul_args(bindings, env, info)
@@ -183,7 +183,7 @@ fn matmul_tiled_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 comptime NUM_WORKERS = 4
 
-fn _matmul_parallel(
+def _matmul_parallel(
     a: UnsafePointer[Float64, MutAnyOrigin],
     b: UnsafePointer[Float64, MutAnyOrigin],
     c: UnsafePointer[Float64, MutAnyOrigin],
@@ -191,7 +191,7 @@ fn _matmul_parallel(
 ):
     for i in range(M * N):
         c[i] = 0.0
-    fn worker(wid: Int) capturing:
+    def worker(wid: Int) capturing:
         # Each worker handles tile-rows with stride = NUM_WORKERS
         var ii = wid * TILE_SIZE
         while ii < M:
@@ -208,7 +208,7 @@ fn _matmul_parallel(
                         for p in range(pp, p_end):
                             var a_ip = a[i * K + p]
                             var row_b = p * N + jj
-                            fn compute[width: Int](j: Int) unified {mut}:
+                            def compute[width: Int](j: Int) unified {mut}:
                                 var b_chunk = b.load[width=width](row_b + j)
                                 var c_chunk = c.load[width=width](row_c + j)
                                 c.store[width=width](row_c + j, c_chunk + a_ip * b_chunk)
@@ -219,7 +219,7 @@ fn _matmul_parallel(
     parallelize[worker](NUM_WORKERS)
 
 
-fn matmul_parallel_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def matmul_parallel_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var bindings = CbArgs.get_bindings(env, info)
         var ptrs = parse_matmul_args(bindings, env, info)
@@ -234,7 +234,7 @@ fn matmul_parallel_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 # --- Module entry point -------------------------------------------------------
 
 @export("napi_register_module_v1", ABI="C")
-fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
         init_async_runtime()
     except:

@@ -30,7 +30,7 @@ from napi.framework.runtime import init_async_runtime
 comptime PARALLEL_THRESHOLD = 4096
 comptime NUM_WORKERS = 4
 
-fn _simd_sum_min_max(
+def _simd_sum_min_max(
     data: UnsafePointer[Float64, MutAnyOrigin], start: Int, end: Int
 ) -> InlineArray[Float64, 3]:
     # Returns [sum, min, max]
@@ -38,7 +38,7 @@ fn _simd_sum_min_max(
     var vmin: Float64 = data[start]
     var vmax: Float64 = data[start]
     var base = start
-    fn compute[width: Int](offset: Int) unified {mut}:
+    def compute[width: Int](offset: Int) unified {mut}:
         var chunk = data.load[width=width](base + offset)
         vsum += chunk.reduce_add()
         var cmin = chunk.reduce_min()
@@ -54,7 +54,7 @@ fn _simd_sum_min_max(
     return result^
 
 
-fn _parallel_sum_min_max(
+def _parallel_sum_min_max(
     data: UnsafePointer[Float64, MutAnyOrigin], size: Int
 ) -> InlineArray[Float64, 3]:
     if size < PARALLEL_THRESHOLD:
@@ -63,7 +63,7 @@ fn _parallel_sum_min_max(
     var p_sum = alloc[Float64](NUM_WORKERS)
     var p_min = alloc[Float64](NUM_WORKERS)
     var p_max = alloc[Float64](NUM_WORKERS)
-    fn worker(wid: Int) capturing:
+    def worker(wid: Int) capturing:
         var s = wid * chunk_size
         var e = s + chunk_size if wid < NUM_WORKERS - 1 else size
         var partial = _simd_sum_min_max(data, s, e)
@@ -91,12 +91,12 @@ fn _parallel_sum_min_max(
 
 # --- SIMD variance pass -------------------------------------------------------
 
-fn _simd_sum_sq_diff(
+def _simd_sum_sq_diff(
     data: UnsafePointer[Float64, MutAnyOrigin], start: Int, end: Int, mean: Float64
 ) -> Float64:
     var sum_sq: Float64 = 0.0
     var base = start
-    fn compute[width: Int](offset: Int) unified {mut}:
+    def compute[width: Int](offset: Int) unified {mut}:
         var chunk = data.load[width=width](base + offset)
         var diff = chunk - mean
         sum_sq += (diff * diff).reduce_add()
@@ -104,14 +104,14 @@ fn _simd_sum_sq_diff(
     return sum_sq
 
 
-fn _parallel_sum_sq_diff(
+def _parallel_sum_sq_diff(
     data: UnsafePointer[Float64, MutAnyOrigin], size: Int, mean: Float64
 ) -> Float64:
     if size < PARALLEL_THRESHOLD:
         return _simd_sum_sq_diff(data, 0, size, mean)
     var chunk_size = size // NUM_WORKERS
     var partials = alloc[Float64](NUM_WORKERS)
-    fn worker(wid: Int) capturing:
+    def worker(wid: Int) capturing:
         var s = wid * chunk_size
         var e = s + chunk_size if wid < NUM_WORKERS - 1 else size
         partials[wid] = _simd_sum_sq_diff(data, s, e, mean)
@@ -125,7 +125,7 @@ fn _parallel_sum_sq_diff(
 
 # --- Quickselect for percentiles -----------------------------------------------
 
-fn _partition(arr: UnsafePointer[Float64, MutAnyOrigin], lo: Int, hi: Int) -> Int:
+def _partition(arr: UnsafePointer[Float64, MutAnyOrigin], lo: Int, hi: Int) -> Int:
     var pivot = arr[hi]
     var i = lo
     for j in range(lo, hi):
@@ -140,7 +140,7 @@ fn _partition(arr: UnsafePointer[Float64, MutAnyOrigin], lo: Int, hi: Int) -> In
     return i
 
 
-fn _quickselect(arr: UnsafePointer[Float64, MutAnyOrigin], size: Int, k: Int) -> Float64:
+def _quickselect(arr: UnsafePointer[Float64, MutAnyOrigin], size: Int, k: Int) -> Float64:
     var left = 0
     var right = size - 1
     while left < right:
@@ -156,7 +156,7 @@ fn _quickselect(arr: UnsafePointer[Float64, MutAnyOrigin], size: Int, k: Int) ->
 
 # --- Full stats computation ---------------------------------------------------
 
-fn _compute_stats(
+def _compute_stats(
     data: UnsafePointer[Float64, MutAnyOrigin], size: Int
 ) -> InlineArray[Float64, 7]:
     # Returns [mean, stddev, min, max, p50, p95, p99]
@@ -195,7 +195,7 @@ fn _compute_stats(
 
 # --- N-API callbacks ----------------------------------------------------------
 
-fn stats_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def stats_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var r = CbArgs.get_bindings_and_one(env, info)
         var b = r.b
@@ -224,7 +224,7 @@ fn stats_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return NapiValue()
 
 
-fn histogram_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def histogram_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var r = CbArgs.get_bindings_and_two(env, info)
         var b = r.b
@@ -274,7 +274,7 @@ fn histogram_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 # --- Module entry point -------------------------------------------------------
 
 @export("napi_register_module_v1", ABI="C")
-fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
         init_async_runtime()
     except:

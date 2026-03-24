@@ -27,14 +27,14 @@ from napi.framework.runtime import init_async_runtime
 
 # --- Helper: get byte pointer + length from Buffer or Uint8Array -------------
 
-fn _get_data_ptr(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UnsafePointer[Byte, MutAnyOrigin]:
+def _get_data_ptr(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UnsafePointer[Byte, MutAnyOrigin]:
     if JsBuffer.is_buffer(b, env, val):
         return JsBuffer(val).data_ptr(b, env)
     if JsTypedArray.is_typedarray(b, env, val):
         return JsTypedArray(val).data_ptr(b, env)
     raise Error("expected Buffer or Uint8Array")
 
-fn _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
+def _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
     if JsBuffer.is_buffer(b, env, val):
         return Int(JsBuffer(val).length(b, env))
     if JsTypedArray.is_typedarray(b, env, val):
@@ -55,7 +55,7 @@ fn _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
 #
 # This avoids per-byte branching and runs entirely in SIMD registers.
 
-fn _simd_count_matches[width: Int](chunk: SIMD[DType.uint8, width], target: Byte) -> Int:
+def _simd_count_matches[width: Int](chunk: SIMD[DType.uint8, width], target: Byte) -> Int:
     var xored = chunk ^ SIMD[DType.uint8, width](target)
     var collapsed = xored | (xored >> 1) | (xored >> 2) | (xored >> 3) | (xored >> 4) | (xored >> 5) | (xored >> 6) | (xored >> 7)
     var non_match = collapsed & SIMD[DType.uint8, width](1)
@@ -67,7 +67,7 @@ fn _simd_count_matches[width: Int](chunk: SIMD[DType.uint8, width], target: Byte
 comptime PARALLEL_THRESHOLD = 65536  # 64KB
 comptime NUM_WORKERS = 4
 
-fn _count_byte_range(
+def _count_byte_range(
     data: UnsafePointer[Byte, MutAnyOrigin],
     target: Byte,
     start: Int,
@@ -75,14 +75,14 @@ fn _count_byte_range(
 ) -> Int:
     var count: Int = 0
     var base = start
-    fn compute[width: Int](offset: Int) unified {mut}:
+    def compute[width: Int](offset: Int) unified {mut}:
         var chunk = data.load[width=width](base + offset)
         count += _simd_count_matches(chunk, target)
     vectorize[simd_width_of[DType.uint8]()](end - start, compute)
     return count
 
 
-fn _count_byte(
+def _count_byte(
     data: UnsafePointer[Byte, MutAnyOrigin],
     target: Byte,
     size: Int,
@@ -91,7 +91,7 @@ fn _count_byte(
         return _count_byte_range(data, target, 0, size)
     var chunk_size = size // NUM_WORKERS
     var partials = alloc[Int](NUM_WORKERS)
-    fn worker(wid: Int) capturing:
+    def worker(wid: Int) capturing:
         var s = wid * chunk_size
         var e = s + chunk_size if wid < NUM_WORKERS - 1 else size
         partials[wid] = _count_byte_range(data, target, s, e)
@@ -105,7 +105,7 @@ fn _count_byte(
 
 # --- SIMD position collection ------------------------------------------------
 
-fn _collect_byte_positions(
+def _collect_byte_positions(
     data: UnsafePointer[Byte, MutAnyOrigin],
     target: Byte,
     size: Int,
@@ -143,7 +143,7 @@ fn _collect_byte_positions(
 # This eliminates most non-matching positions in bulk via SIMD, then only does
 # expensive byte-by-byte comparison on the rare candidates that pass the filter.
 
-fn _count_multi_byte(
+def _count_multi_byte(
     data: UnsafePointer[Byte, MutAnyOrigin],
     needle: UnsafePointer[Byte, MutAnyOrigin],
     data_len: Int,
@@ -186,7 +186,7 @@ fn _count_multi_byte(
     return count
 
 
-fn _collect_multi_byte(
+def _collect_multi_byte(
     data: UnsafePointer[Byte, MutAnyOrigin],
     needle: UnsafePointer[Byte, MutAnyOrigin],
     data_len: Int,
@@ -233,7 +233,7 @@ fn _collect_multi_byte(
 
 # --- N-API callbacks ----------------------------------------------------------
 
-fn count_byte_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def count_byte_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var r = CbArgs.get_bindings_and_two(env, info)
         var b = r.b
@@ -247,7 +247,7 @@ fn count_byte_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return NapiValue()
 
 
-fn count_lines_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def count_lines_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var r = CbArgs.get_bindings_and_one(env, info)
         var b = r.b
@@ -260,7 +260,7 @@ fn count_lines_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return NapiValue()
 
 
-fn search_all_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def search_all_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var r = CbArgs.get_bindings_and_two(env, info)
         var b = r.b
@@ -295,7 +295,7 @@ fn search_all_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 # --- Module entry point -------------------------------------------------------
 
 @export("napi_register_module_v1", ABI="C")
-fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
         init_async_runtime()
     except:

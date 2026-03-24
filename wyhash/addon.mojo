@@ -31,31 +31,31 @@ comptime _WYP3: UInt64 = 0x589965cc75374cc3
 
 # --- Core primitives ---------------------------------------------------------
 
-fn _wymum(a: UInt64, b: UInt64) -> UInt64:
+def _wymum(a: UInt64, b: UInt64) -> UInt64:
     """128-bit folded multiply: (a * b) as 128-bit, return lo XOR hi."""
     var m = a.cast[DType.uint128]() * b.cast[DType.uint128]()
     var parts = bitcast[DType.uint64, 2](m)
     return parts[0] ^ parts[1]
 
 
-fn _wyr8(p: UnsafePointer[Byte, MutAnyOrigin], offset: Int) -> UInt64:
+def _wyr8(p: UnsafePointer[Byte, MutAnyOrigin], offset: Int) -> UInt64:
     """Read 8 bytes as little-endian UInt64."""
     return (p + offset).bitcast[UInt64]()[]
 
 
-fn _wyr4(p: UnsafePointer[Byte, MutAnyOrigin], offset: Int) -> UInt64:
+def _wyr4(p: UnsafePointer[Byte, MutAnyOrigin], offset: Int) -> UInt64:
     """Read 4 bytes as little-endian UInt32, zero-extend to UInt64."""
     return UInt64((p + offset).bitcast[UInt32]()[])
 
 
-fn _wyr3(p: UnsafePointer[Byte, MutAnyOrigin], k: Int, length: Int) -> UInt64:
+def _wyr3(p: UnsafePointer[Byte, MutAnyOrigin], k: Int, length: Int) -> UInt64:
     """Read 1-3 bytes into a UInt64."""
     return (UInt64(p[k]) << 16) | (UInt64(p[k + (length >> 1)]) << 8) | UInt64(p[k + length - 1])
 
 
 # --- wyhash main function ----------------------------------------------------
 
-fn wyhash(data: UnsafePointer[Byte, MutAnyOrigin], length: Int, in_seed: UInt64) -> UInt64:
+def wyhash(data: UnsafePointer[Byte, MutAnyOrigin], length: Int, in_seed: UInt64) -> UInt64:
     var seed = in_seed ^ _wymum(in_seed ^ _WYP0, _WYP1)
     var a: UInt64 = 0
     var b: UInt64 = 0
@@ -103,14 +103,14 @@ fn wyhash(data: UnsafePointer[Byte, MutAnyOrigin], length: Int, in_seed: UInt64)
 
 # --- Helper: get byte pointer + length from Buffer or Uint8Array -------------
 
-fn _get_data_ptr(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UnsafePointer[Byte, MutAnyOrigin]:
+def _get_data_ptr(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UnsafePointer[Byte, MutAnyOrigin]:
     if JsBuffer.is_buffer(b, env, val):
         return JsBuffer(val).data_ptr(b, env)
     if JsTypedArray.is_typedarray(b, env, val):
         return JsTypedArray(val).data_ptr(b, env)
     raise Error("expected Buffer or Uint8Array")
 
-fn _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
+def _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
     if JsBuffer.is_buffer(b, env, val):
         return Int(JsBuffer(val).length(b, env))
     if JsTypedArray.is_typedarray(b, env, val):
@@ -118,9 +118,9 @@ fn _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
     raise Error("expected Buffer or Uint8Array")
 
 
-# --- Read seed argument (Number or BigInt, default 0) -------------------------
+# --- Read seed argument (Number or BigInt, def ault 0) -------------------------
 
-fn _read_seed(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UInt64:
+def _read_seed(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UInt64:
     var t = js_typeof(b, env, val)
     if t == NAPI_TYPE_NUMBER:
         return UInt64(Int64(JsNumber.from_napi_value(b, env, val)))
@@ -131,7 +131,7 @@ fn _read_seed(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UInt64:
 
 # --- N-API callbacks ----------------------------------------------------------
 
-fn wy_hash_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def wy_hash_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     """wyHash(buf, seed?) → BigInt"""
     try:
         var bindings = CbArgs.get_bindings(env, info)
@@ -150,7 +150,7 @@ fn wy_hash_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return NapiValue()
 
 
-fn wy_hash64_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def wy_hash64_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     """wyHash64(buf, seed?) → Number (lossy Float64)"""
     try:
         var bindings = CbArgs.get_bindings(env, info)
@@ -172,7 +172,7 @@ fn wy_hash64_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 # --- Module entry point -------------------------------------------------------
 
 @export("napi_register_module_v1", ABI="C")
-fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     var bindings_ptr = alloc[NapiBindings](1)
     try:
         var bindings = NapiBindings()
