@@ -86,8 +86,6 @@ node wyhash/hash.js
 | **wyHash** (BigInt) | 3.7x | **52.9x** | **65.9x** | **66.2x** | 128-bit folded multiply |
 | wyHash64 (Number) | 2.9x | 45.5x | 57.8x | 58.7x | Same kernel, Number return |
 
-See [ROADMAP.md](ROADMAP.md) for the full project roadmap.
-
 ## When to Use Mojo
 
 V8's JIT compiler is already fast for scalar code. The matmul example shows this clearly: Mojo with the *same algorithm* is only 1.9-2.2x faster. A native addon has real costs -- build toolchain, N-API call overhead, platform-specific binaries. Mojo is worth reaching for when:
@@ -132,3 +130,24 @@ cd /path/to/mojo-addon-examples && npm link napi-mojo
 ```
 
 This replaces the npm-installed package with a symlink to your local checkout. Run `npm install` to revert back to the published package.
+
+## Architecture
+
+Each example is self-contained:
+
+```text
+example-name/
+  addon.mojo          # Mojo source (SIMD kernels + N-API callbacks)
+  example.js           # Demo + benchmark script
+  build.sh             # Build script (compile .mojo -> .node)
+  README.md            # Example-specific docs + benchmark results
+```
+
+All examples depend on napi-mojo for the N-API framework (`napi.types`, `napi.framework.*`).
+
+### Common Patterns
+
+- **Zero-copy TypedArray access:** `JsTypedArray.data_ptr(env).bitcast[Float64]()` reads JS memory directly
+- **SIMD vectorize:** `vectorize[simd_width_of[DType.float64]()](size, compute)` with `unified {mut}` closure
+- **Multi-core parallel:** `parallelize[worker](num_workers)` with `capturing` closure
+- **Runtime init:** `KGEN_CompilerRT_AsyncRT_CreateRuntime` via `OwnedDLHandle()` for parallelize in shared libs
