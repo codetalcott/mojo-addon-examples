@@ -32,7 +32,7 @@ comptime _WYP3: UInt64 = 0x589965cc75374cc3
 # --- Core primitives ---------------------------------------------------------
 
 def _wymum(a: UInt64, b: UInt64) -> UInt64:
-    """128-bit folded multiply: (a * b) as 128-bit, return lo XOR hi."""
+    """Compute 128-bit folded multiply: (a * b) as 128-bit, return lo XOR hi."""
     var m = a.cast[DType.uint128]() * b.cast[DType.uint128]()
     var parts = bitcast[DType.uint64, 2](m)
     return parts[0] ^ parts[1]
@@ -132,7 +132,7 @@ def _read_seed(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UInt64:
 # --- N-API callbacks ----------------------------------------------------------
 
 def wy_hash_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
-    """wyHash(buf, seed?) → BigInt"""
+    """WyHash(buf, seed?) → BigInt."""
     try:
         var bindings = CbArgs.get_bindings(env, info)
         var argc = CbArgs.argc(bindings, env, info)
@@ -151,7 +151,7 @@ def wy_hash_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 
 def wy_hash64_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
-    """wyHash64(buf, seed?) → Number (lossy Float64)"""
+    """WyHash64(buf, seed?) → Number (lossy Float64)."""
     try:
         var bindings = CbArgs.get_bindings(env, info)
         var argc = CbArgs.argc(bindings, env, info)
