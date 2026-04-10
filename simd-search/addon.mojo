@@ -10,11 +10,16 @@
 
 from std.algorithm.functional import vectorize, parallelize
 from std.sys import simd_width_of
-from std.memory import alloc
+from std.math import ceildiv
+from std.memory import alloc, memcpy, stack_allocation
+from std.gpu import thread_idx, block_idx, barrier
+from std.gpu.memory import AddressSpace
+from std.gpu.host import DeviceContext
 
 from napi.types import NapiEnv, NapiValue
-from napi.error import throw_js_error
+from napi.error import throw_js_error, check_status
 from napi.bindings import NapiBindings, Bindings, init_bindings
+from napi.raw import raw_set_instance_data, raw_get_instance_data
 from napi.framework.js_number import JsNumber
 from napi.framework.js_int32 import JsInt32
 from napi.framework.js_buffer import JsBuffer
@@ -23,6 +28,40 @@ from napi.framework.js_arraybuffer import JsArrayBuffer
 from napi.framework.args import CbArgs
 from napi.framework.register import fn_ptr, ModuleBuilder
 from napi.framework.runtime import init_async_runtime
+
+
+# --- GPU tuning + state cache ------------------------------------------------
+
+comptime GPU_BLOCK = 256
+comptime GPU_ELEMS_PER_THREAD = 16
+comptime GPU_CHUNK = GPU_BLOCK * GPU_ELEMS_PER_THREAD
+
+
+struct GpuState(Movable):
+    var ctx: DeviceContext
+
+    def __init__(out self, var ctx: DeviceContext):
+        self.ctx = ctx^
+
+
+def _gpu_state_finalize(
+    env: NapiEnv,
+    data: OpaquePointer[MutAnyOrigin],
+    hint: OpaquePointer[MutAnyOrigin],
+):
+    var ptr = data.bitcast[GpuState]()
+    ptr.destroy_pointee()
+    ptr.free()
+
+
+def _get_gpu_state(
+    b: Bindings, env: NapiEnv
+) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
+    var data = OpaquePointer[MutAnyOrigin]()
+    _ = raw_get_instance_data(b, env, UnsafePointer(to=data).bitcast[NoneType]())
+    if Int(data) == 0:
+        raise Error("countByteGpu requires a GPU (no accelerator found)")
+    return data.bitcast[GpuState]()
 
 
 # --- Helper: get byte pointer + length from Buffer or Uint8Array -------------
@@ -100,6 +139,81 @@ def _count_byte(
     for i in range(NUM_WORKERS):
         total += partials[i]
     partials.free()
+    return total
+
+
+# --- GPU countByte: tree-reduction kernel -----------------------------------
+# Each thread reads GPU_ELEMS_PER_THREAD bytes, counts matches locally, writes
+# to shared memory, then block-wide tree reduction. One partial per block.
+# Pure integer; Metal-safe.
+
+def _gpu_kernel_count_byte(
+    data: UnsafePointer[Byte, MutAnyOrigin],
+    partial: UnsafePointer[UInt32, MutAnyOrigin],
+    target: UInt32,
+    size: Int,
+):
+    var s_count = stack_allocation[
+        GPU_BLOCK, Scalar[DType.uint32], address_space=AddressSpace.SHARED
+    ]()
+
+    var tid = Int(thread_idx.x)
+    var bid = Int(block_idx.x)
+    var base = bid * GPU_CHUNK + tid
+
+    var local: UInt32 = 0
+    for i in range(GPU_ELEMS_PER_THREAD):
+        var idx = base + i * GPU_BLOCK
+        if idx < size:
+            if UInt32(data[idx]) == target:
+                local += 1
+
+    s_count[tid] = local
+    barrier()
+
+    var step = GPU_BLOCK // 2
+    while step > 0:
+        if tid < step:
+            s_count[tid] = s_count[tid] + s_count[tid + step]
+        barrier()
+        step //= 2
+
+    if tid == 0:
+        partial[bid] = s_count[0]
+
+
+def _count_byte_gpu(
+    ctx: DeviceContext,
+    data: UnsafePointer[Byte, MutAnyOrigin],
+    target: Byte,
+    size: Int,
+) raises -> Int:
+    var num_blocks = ceildiv(size, GPU_CHUNK)
+
+    var dev_data = ctx.enqueue_create_buffer[DType.uint8](size)
+    var host_data = ctx.enqueue_create_host_buffer[DType.uint8](size)
+    memcpy(dest=host_data.unsafe_ptr(), src=data, count=size)
+    ctx.enqueue_copy(dev_data, host_data)
+
+    var dev_partial = ctx.enqueue_create_buffer[DType.uint32](num_blocks)
+
+    ctx.enqueue_function[_gpu_kernel_count_byte, _gpu_kernel_count_byte](
+        dev_data.unsafe_ptr(),
+        dev_partial.unsafe_ptr(),
+        UInt32(target),
+        size,
+        grid_dim=num_blocks,
+        block_dim=GPU_BLOCK,
+    )
+
+    var host_partial = ctx.enqueue_create_host_buffer[DType.uint32](num_blocks)
+    ctx.enqueue_copy(host_partial, dev_partial)
+    ctx.synchronize()
+
+    var ptr = host_partial.unsafe_ptr()
+    var total: Int = 0
+    for i in range(num_blocks):
+        total += Int(ptr[i])
     return total
 
 
@@ -247,6 +361,21 @@ def count_byte_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return NapiValue()
 
 
+def count_byte_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+    try:
+        var r = CbArgs.get_bindings_and_two(env, info)
+        var b = r.b
+        var ptr = _get_data_ptr(b, env, r.arg0)
+        var size = _get_data_len(b, env, r.arg0)
+        var target = Byte(JsInt32.from_napi_value(b, env, r.arg1))
+        var state = _get_gpu_state(b, env)
+        var count = _count_byte_gpu(state[].ctx, ptr, target, size)
+        return JsNumber.create(b, env, Float64(count)).value
+    except:
+        throw_js_error(env, "countByteGpu failed (no GPU or kernel error)")
+        return NapiValue()
+
+
 def count_lines_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var r = CbArgs.get_bindings_and_one(env, info)
@@ -311,13 +440,34 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
         return exports
     var cb_data = bindings_ptr.bitcast[NoneType]()
 
+    # Cache a DeviceContext if a GPU is available.
+    try:
+        var ctx = DeviceContext()
+        var state_ptr = alloc[GpuState](1)
+        state_ptr.init_pointee_move(GpuState(ctx^))
+        var fin_ref = _gpu_state_finalize
+        var fin_ptr = UnsafePointer(to=fin_ref).bitcast[
+            OpaquePointer[MutAnyOrigin]
+        ]()[]
+        _ = raw_set_instance_data(
+            bindings_ptr,
+            env,
+            state_ptr.bitcast[NoneType](),
+            fin_ptr,
+            OpaquePointer[MutAnyOrigin](),
+        )
+    except:
+        pass
+
     var cb_ref = count_byte_fn
+    var cb_gpu_ref = count_byte_gpu_fn
     var cl_ref = count_lines_fn
     var sa_ref = search_all_fn
 
     try:
         var m = ModuleBuilder(env, exports, cb_data)
         m.method("countByte", fn_ptr(cb_ref))
+        m.method("countByteGpu", fn_ptr(cb_gpu_ref))
         m.method("countLines", fn_ptr(cl_ref))
         m.method("searchAll", fn_ptr(sa_ref))
         m.flush()

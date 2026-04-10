@@ -122,6 +122,22 @@ for (const [SIZE, ITERS] of sizes) {
   const speedup = (jsResult.ms / mojoResult.ms).toFixed(1);
   console.log(`  ${jsResult.name}: ${jsResult.ms.toFixed(1)}ms  ${formatOps(jsResult.opsPerSec)} ops/sec  (baseline)`);
   console.log(`  ${mojoResult.name}: ${mojoResult.ms.toFixed(1)}ms  ${formatOps(mojoResult.opsPerSec)} ops/sec  ${speedup}x`);
+
+  if (typeof addon.countByteGpu === 'function') {
+    try {
+      // Correctness spot-check.
+      const cpuSpot = addon.countByte(buf, target);
+      const gpuSpot = addon.countByteGpu(buf, target);
+      if (cpuSpot !== gpuSpot) {
+        throw new Error(`mismatch: cpu=${cpuSpot} gpu=${gpuSpot}`);
+      }
+      const gpuResult = bench('Mojo GPU ', () => addon.countByteGpu(buf, target), ITERS);
+      const gSpeed = (jsResult.ms / gpuResult.ms).toFixed(1);
+      console.log(`  ${gpuResult.name}: ${gpuResult.ms.toFixed(1)}ms  ${formatOps(gpuResult.opsPerSec)} ops/sec  ${gSpeed}x`);
+    } catch (e) {
+      console.log(`  Mojo GPU : skipped (${e.message})`);
+    }
+  }
 }
 
 console.log('\n--- searchAll benchmark (single-byte, ~1% hit rate) ---');

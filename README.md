@@ -32,14 +32,17 @@ SIMD byte scanning that's impossible to express in pure JavaScript. Three functi
 node simd-search/search.js
 ```
 
-**Results (M4 Mac, CPU, Buffer/Uint8Array):**
+**Results (M4 Mac, Buffer/Uint8Array):**
 
 | Function | 1MB | 16MB | 100MB | Mojo Feature |
 |----------|-----|------|-------|-------------|
-| **countByte** | **19.2x** | **52.4x** | **67.6x** | SIMD XOR + reduce, `parallelize()` |
+| **countByte CPU** | **19.2x** | **52.4x** | **67.6x** | SIMD XOR + reduce, `parallelize()` |
+| countByte GPU Metal | 0.9x | 1.0x | 2.3x | Tree reduction, shared memory partials |
 | countLines | 18.5x | 50.1x | 65.3x | Same kernel, byte=0x0A |
 | searchAll (1-byte) | 2.5x | 2.8x | 3.1x | Two-pass: SIMD count + collect |
 | searchAll (multi-byte) | 2.0x | 2.3x | 2.5x | First+last byte SIMD filter |
+
+`countByteGpu()` is published honestly: at 100MB it's 2.3× JS vs CPU SIMD's 67.6× — a 30× gap. Byte-scan kernels on integrated GPUs are copy-bound rather than compute-bound; the M4 CPU's direct DRAM access wins decisively. Output matches the CPU path exactly. See [simd-search/README.md](simd-search/README.md) for why, and expected-to-flip-on-H100 notes.
 
 ### Statistics — SIMD Aggregation
 
