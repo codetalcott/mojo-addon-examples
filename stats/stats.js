@@ -136,16 +136,9 @@ for (const [SIZE, ITERS] of sizes) {
           throw new Error(`${k} mismatch: gpu=${gpuSpot[k]} cpu=${cpuSpot[k]}`);
         }
       }
-      // NOTE: Metal DeviceContext isn't released cleanly on scope exit
-      // (Mojo 25.6 Tier-3 Metal). After ~2K-5K dispatches the context pool
-      // saturates and subsequent calls return zero. Cap GPU iterations to
-      // stay well under that limit — this is a sanity benchmark, not a
-      // stress test. Production would cache the DeviceContext across calls.
-      const GPU_ITERS = Math.min(ITERS, 500);
-      const gpuR = bench('Mojo GPU ', () => addon.statsGpu(data), GPU_ITERS);
-      const gSpeed = (jsR.ms / (gpuR.ms * (ITERS / GPU_ITERS))).toFixed(1);
-      const iterNote = GPU_ITERS < ITERS ? ` (${GPU_ITERS}/${ITERS} iters)` : '';
-      console.log(`  ${gpuR.name}: ${gpuR.ms.toFixed(1)}ms  ${formatOps(gpuR.opsPerSec)} ops/sec  ${gSpeed}x${iterNote}`);
+      const gpuR = bench('Mojo GPU ', () => addon.statsGpu(data), ITERS);
+      const gSpeed = (jsR.ms / gpuR.ms).toFixed(1);
+      console.log(`  ${gpuR.name}: ${gpuR.ms.toFixed(1)}ms  ${formatOps(gpuR.opsPerSec)} ops/sec  ${gSpeed}x`);
     } catch (e) {
       console.log(`  Mojo GPU : skipped (${e.message})`);
     }

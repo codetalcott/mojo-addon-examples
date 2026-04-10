@@ -16,8 +16,9 @@ from std.gpu.memory import AddressSpace
 from std.gpu.host import DeviceContext
 
 from napi.types import NapiEnv, NapiValue
-from napi.error import throw_js_error
+from napi.error import throw_js_error, check_status
 from napi.bindings import NapiBindings, Bindings, init_bindings
+from napi.raw import raw_set_instance_data, raw_get_instance_data
 from napi.framework.js_number import JsNumber
 from napi.framework.js_int32 import JsInt32
 from napi.framework.js_object import JsObject
@@ -37,6 +38,39 @@ comptime NUM_WORKERS = 4
 comptime GPU_BLOCK = 256
 comptime GPU_ELEMS_PER_THREAD = 8
 comptime GPU_CHUNK = GPU_BLOCK * GPU_ELEMS_PER_THREAD  # elements per block
+
+
+# --- GPU state cache (one DeviceContext per addon instance) ------------------
+# Stored via napi_set_instance_data at register_module time and retrieved in
+# every GPU callback. Avoids the Metal-resource leak that happens when a fresh
+# DeviceContext is created per call.
+
+struct GpuState(Movable):
+    var ctx: DeviceContext
+
+    def __init__(out self, var ctx: DeviceContext):
+        self.ctx = ctx^
+
+
+def _gpu_state_finalize(
+    env: NapiEnv,
+    data: OpaquePointer[MutAnyOrigin],
+    hint: OpaquePointer[MutAnyOrigin],
+):
+    var ptr = data.bitcast[GpuState]()
+    ptr.destroy_pointee()
+    ptr.free()
+
+
+def _get_gpu_state(
+    b: Bindings, env: NapiEnv
+) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
+    """Fetch the cached GpuState pointer, or raise if GPU unavailable."""
+    var data = OpaquePointer[MutAnyOrigin]()
+    _ = raw_get_instance_data(b, env, UnsafePointer(to=data).bitcast[NoneType]())
+    if Int(data) == 0:
+        raise Error("statsGpu requires a GPU (no accelerator found)")
+    return data.bitcast[GpuState]()
 
 def _simd_sum_min_max(
     data: UnsafePointer[Float64, MutAnyOrigin], start: Int, end: Int
@@ -496,14 +530,10 @@ def stats_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
             return NapiValue()
         var ptr = ta.data_ptr(b, env).bitcast[Float64]()
 
-        var ctx: DeviceContext
-        try:
-            ctx = DeviceContext()
-        except:
-            throw_js_error(env, "statsGpu requires a GPU (no accelerator found)")
-            return NapiValue()
-
-        var s = _compute_stats_gpu(ctx, ptr, size)
+        # Retrieve the cached DeviceContext (set in register_module). Raises
+        # if no GPU was available at load time.
+        var state = _get_gpu_state(b, env)
+        var s = _compute_stats_gpu(state[].ctx, ptr, size)
 
         var obj = JsObject.create(b, env)
         obj.set_property(b, env, "mean",   JsNumber.create(b, env, s[0]).value)
@@ -584,6 +614,26 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
         bindings_ptr.free()
         return exports
     var cb_data = bindings_ptr.bitcast[NoneType]()
+
+    # Try to create and cache a DeviceContext. If no GPU is present this
+    # raises and we skip the caching — statsGpu will then throw on invocation.
+    try:
+        var ctx = DeviceContext()
+        var state_ptr = alloc[GpuState](1)
+        state_ptr.init_pointee_move(GpuState(ctx^))
+        var fin_ref = _gpu_state_finalize
+        var fin_ptr = UnsafePointer(to=fin_ref).bitcast[
+            OpaquePointer[MutAnyOrigin]
+        ]()[]
+        _ = raw_set_instance_data(
+            bindings_ptr,
+            env,
+            state_ptr.bitcast[NoneType](),
+            fin_ptr,
+            OpaquePointer[MutAnyOrigin](),
+        )
+    except:
+        pass  # No GPU — CPU-only mode, statsGpu will throw on call.
 
     var stats_ref = stats_fn
     var stats_gpu_ref = stats_gpu_fn

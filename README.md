@@ -49,12 +49,15 @@ Compute `{mean, stddev, min, max, p50, p95, p99}` on Float64Arrays in a single c
 node stats/stats.js
 ```
 
-**Results (M4 Mac, CPU, Float64):**
+**Results (M4 Mac, Float64):**
 
 | Function | 100K | 1M | 10M | Mojo Feature |
 |----------|------|-----|-----|-------------|
-| **stats()** | **4.2x** | **5.8x** | **6.7x** | SIMD reduce_add/min/max, `parallelize()` |
-| histogram() | 3.7x | 3.9x | 4.0x | SIMD min/max range detection |
+| **stats() CPU** | **4.2x** | **5.8x** | **6.7x** | SIMD reduce_add/min/max, `parallelize()` |
+| stats() GPU Metal | 2.1x | 4.0x | 4.2x | Shared-memory tree reduction via `DeviceContext` (Float32 internal) |
+| histogram() CPU | 3.7x | 3.9x | 4.0x | SIMD min/max range detection |
+
+`statsGpu()` runs on the M4's integrated GPU via Mojo's Metal 4 backend. Kernels are Float32 (Metal constraint); the H2D cast and final Float64 reduction happen on the host. See [stats/README.md](stats/README.md) for precision notes.
 
 ### Image Processing — Pixel Operations
 
