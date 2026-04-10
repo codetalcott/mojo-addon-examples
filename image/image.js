@@ -160,7 +160,24 @@ function runBenchmarks(label, width, height, iters) {
 
   const jsGray = bench('JS grayscale', () => jsGrayscale(img, width, height), 3, iters);
   const mojoGray = bench('Mojo grayscale', () => addon.grayscale(img, width, height), 3, iters);
-  console.log(`  grayscale:  JS ${jsGray.ms.toFixed(2)}ms  Mojo ${mojoGray.ms.toFixed(2)}ms  ${(jsGray.ms / mojoGray.ms).toFixed(1)}x`);
+  let grayLine = `  grayscale:  JS ${jsGray.ms.toFixed(2)}ms  Mojo ${mojoGray.ms.toFixed(2)}ms  ${(jsGray.ms / mojoGray.ms).toFixed(1)}x`;
+  if (typeof addon.grayscaleGpu === 'function') {
+    try {
+      // Correctness spot-check: GPU output must match CPU exactly (integer math).
+      const cpuSpot = addon.grayscale(img, width, height);
+      const gpuSpot = addon.grayscaleGpu(img, width, height);
+      for (let i = 0; i < cpuSpot.length; i++) {
+        if (cpuSpot[i] !== gpuSpot[i]) {
+          throw new Error(`byte ${i} mismatch: cpu=${cpuSpot[i]} gpu=${gpuSpot[i]}`);
+        }
+      }
+      const mojoGrayGpu = bench('Mojo grayscaleGpu', () => addon.grayscaleGpu(img, width, height), 3, iters);
+      grayLine += `  GPU ${mojoGrayGpu.ms.toFixed(2)}ms  ${(jsGray.ms / mojoGrayGpu.ms).toFixed(1)}x`;
+    } catch (e) {
+      grayLine += `  GPU skipped (${e.message})`;
+    }
+  }
+  console.log(grayLine);
 
   const jsBright = bench('JS brightness', () => jsBrightness(img, width, height, 1.5), 3, iters);
   const mojoBright = bench('Mojo brightness', () => addon.brightness(img, width, height, 1.5), 3, iters);

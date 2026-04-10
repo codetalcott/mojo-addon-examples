@@ -11,11 +11,15 @@
 
 from std.algorithm.functional import parallelize, vectorize
 from std.sys import simd_width_of
-from std.memory import alloc
+from std.math import ceildiv
+from std.memory import alloc, memcpy
+from std.gpu import global_idx
+from std.gpu.host import DeviceContext
 
 from napi.types import NapiEnv, NapiValue
-from napi.error import throw_js_error
+from napi.error import throw_js_error, check_status
 from napi.bindings import NapiBindings, Bindings, init_bindings
+from napi.raw import raw_set_instance_data, raw_get_instance_data
 from napi.framework.js_number import JsNumber
 from napi.framework.js_int32 import JsInt32
 from napi.framework.js_typedarray import JsTypedArray
@@ -26,6 +30,40 @@ from napi.framework.runtime import init_async_runtime
 
 
 comptime NUM_WORKERS = 4
+
+# GPU tuning
+comptime GPU_BLOCK = 256
+
+
+# --- GPU state cache (one DeviceContext per addon instance) ------------------
+# Stored via napi_set_instance_data at register_module time. See Phase 2a in
+# stats/addon.mojo for the pattern rationale.
+
+struct GpuState(Movable):
+    var ctx: DeviceContext
+
+    def __init__(out self, var ctx: DeviceContext):
+        self.ctx = ctx^
+
+
+def _gpu_state_finalize(
+    env: NapiEnv,
+    data: OpaquePointer[MutAnyOrigin],
+    hint: OpaquePointer[MutAnyOrigin],
+):
+    var ptr = data.bitcast[GpuState]()
+    ptr.destroy_pointee()
+    ptr.free()
+
+
+def _get_gpu_state(
+    b: Bindings, env: NapiEnv
+) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
+    var data = OpaquePointer[MutAnyOrigin]()
+    _ = raw_get_instance_data(b, env, UnsafePointer(to=data).bitcast[NoneType]())
+    if Int(data) == 0:
+        raise Error("grayscaleGpu requires a GPU (no accelerator found)")
+    return data.bitcast[GpuState]()
 
 
 # --- Grayscale kernel ---------------------------------------------------------
@@ -63,6 +101,67 @@ def _grayscale_parallel(
         var e = s + rows_per if wid < NUM_WORKERS - 1 else height
         _grayscale_rows(src, dst, s, e, width)
     parallelize[worker](NUM_WORKERS)
+
+
+# --- Grayscale GPU kernel -----------------------------------------------------
+# Same fixed-point integer algorithm as the CPU kernel. One thread per pixel.
+# No shared memory, no reduction — pure elementwise. Metal-safe (integer only).
+
+def _gpu_kernel_grayscale(
+    src: UnsafePointer[UInt32, MutAnyOrigin],
+    dst: UnsafePointer[UInt32, MutAnyOrigin],
+    num_pixels: Int,
+):
+    var tid = Int(global_idx.x)
+    if tid >= num_pixels:
+        return
+    var pixel = src[tid]
+    var r = pixel & 0xFF
+    var g = (pixel >> 8) & 0xFF
+    var b_ch = (pixel >> 16) & 0xFF
+    var a = pixel & 0xFF000000
+    var gray = (77 * r + 150 * g + 29 * b_ch) >> 8
+    dst[tid] = gray | (gray << 8) | (gray << 16) | a
+
+
+def _grayscale_gpu(
+    ctx: DeviceContext,
+    src: UnsafePointer[Byte, MutAnyOrigin],
+    dst: UnsafePointer[Byte, MutAnyOrigin],
+    width: Int, height: Int,
+) raises:
+    var num_pixels = width * height
+    var num_bytes = num_pixels * 4
+
+    var dev_src = ctx.enqueue_create_buffer[DType.uint32](num_pixels)
+    var dev_dst = ctx.enqueue_create_buffer[DType.uint32](num_pixels)
+    var host_src = ctx.enqueue_create_host_buffer[DType.uint32](num_pixels)
+
+    memcpy(
+        dest=host_src.unsafe_ptr().bitcast[Byte](),
+        src=src,
+        count=num_bytes,
+    )
+    ctx.enqueue_copy(dev_src, host_src)
+
+    var grid = ceildiv(num_pixels, GPU_BLOCK)
+    ctx.enqueue_function[_gpu_kernel_grayscale, _gpu_kernel_grayscale](
+        dev_src.unsafe_ptr(),
+        dev_dst.unsafe_ptr(),
+        num_pixels,
+        grid_dim=grid,
+        block_dim=GPU_BLOCK,
+    )
+
+    var host_dst = ctx.enqueue_create_host_buffer[DType.uint32](num_pixels)
+    ctx.enqueue_copy(host_dst, dev_dst)
+    ctx.synchronize()
+
+    memcpy(
+        dest=dst,
+        src=host_dst.unsafe_ptr().bitcast[Byte](),
+        count=num_bytes,
+    )
 
 
 # --- Brightness kernel --------------------------------------------------------
@@ -270,6 +369,26 @@ def grayscale_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return NapiValue()
 
 
+def grayscale_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+    try:
+        var bindings = CbArgs.get_bindings(env, info)
+        var args = CbArgs.get_three(bindings, env, info)
+        var ta = JsTypedArray(args[0])
+        var width = Int(JsInt32.from_napi_value(bindings, env, args[1]))
+        var height = Int(JsInt32.from_napi_value(bindings, env, args[2]))
+        var num_bytes = width * height * 4
+        var src_ptr = ta.data_ptr(bindings, env)
+        var ab = JsArrayBuffer.create(bindings, env, UInt(num_bytes))
+        var dst_ptr = ab.data_ptr(bindings, env)
+        var state = _get_gpu_state(bindings, env)
+        _grayscale_gpu(state[].ctx, src_ptr, dst_ptr, width, height)
+        var result_ta = JsTypedArray.create_uint8(bindings, env, ab.value, 0, UInt(num_bytes))
+        return result_ta.value
+    except:
+        throw_js_error(env, "grayscaleGpu failed (no GPU or kernel error)")
+        return NapiValue()
+
+
 def brightness_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var bindings = CbArgs.get_bindings(env, info)
@@ -350,7 +469,27 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
         return exports
     var cb_data = bindings_ptr.bitcast[NoneType]()
 
+    # Cache a DeviceContext if a GPU is available. Skip silently if not.
+    try:
+        var ctx = DeviceContext()
+        var state_ptr = alloc[GpuState](1)
+        state_ptr.init_pointee_move(GpuState(ctx^))
+        var fin_ref = _gpu_state_finalize
+        var fin_ptr = UnsafePointer(to=fin_ref).bitcast[
+            OpaquePointer[MutAnyOrigin]
+        ]()[]
+        _ = raw_set_instance_data(
+            bindings_ptr,
+            env,
+            state_ptr.bitcast[NoneType](),
+            fin_ptr,
+            OpaquePointer[MutAnyOrigin](),
+        )
+    except:
+        pass
+
     var gray_ref = grayscale_fn
+    var gray_gpu_ref = grayscale_gpu_fn
     var bright_ref = brightness_fn
     var thresh_ref = threshold_fn
     var blur_ref = blur_fn
@@ -358,6 +497,7 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
         var m = ModuleBuilder(env, exports, cb_data)
         m.method("grayscale", fn_ptr(gray_ref))
+        m.method("grayscaleGpu", fn_ptr(gray_gpu_ref))
         m.method("brightness", fn_ptr(bright_ref))
         m.method("threshold", fn_ptr(thresh_ref))
         m.method("blur", fn_ptr(blur_ref))

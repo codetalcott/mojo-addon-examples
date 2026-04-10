@@ -67,14 +67,17 @@ Four RGBA pixel operations on Uint8Arrays: `grayscale`, `brightness`, `threshold
 node image/image.js
 ```
 
-**Results (M4 Mac, CPU, RGBA Uint8Array):**
+**Results (M4 Mac, RGBA Uint8Array):**
 
 | Function | 720p | 1080p | 4K | Mojo Feature |
 |----------|------|-------|-----|-------------|
-| grayscale | 6.8x | 5.4x | **6.8x** | Integer `(77R+150G+29B)>>8`, `parallelize()` |
+| grayscale CPU | 6.8x | 5.4x | **6.8x** | Integer `(77R+150G+29B)>>8`, `parallelize()` |
+| grayscale GPU Metal | 0.6x | 0.6x | 0.8x | One-pixel-per-thread elementwise kernel |
 | brightness | 4.7x | 5.1x | 5.0x | Fixed-point multiply + clamp, `parallelize()` |
 | threshold | 5.5x | 5.2x | **6.5x** | Grayscale + compare, `parallelize()` |
 | **blur(r=5)** | 6.8x | **10.1x** | 5.6x | Separable box blur, parallel rows + cols |
+
+`grayscaleGpu()` is published despite being **slower than JS** because it illustrates an important limit: on integrated GPUs (M4's unified memory architecture), the H2D/D2H "copies" are pure overhead with no bandwidth benefit. For a trivial per-pixel kernel the copy cost dominates. Output matches the CPU path byte-for-byte. On a discrete GPU with real HBM the ordering is expected to flip — see [image/README.md](image/README.md).
 
 ### wyhash — Fast Non-Cryptographic Hash
 
