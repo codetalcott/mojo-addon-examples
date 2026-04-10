@@ -6,4 +6,4 @@ platforms = ["osx-arm64", "linux-64"]
 version = "0.1.0"
 
 [dependencies]
-mojo = "==0.26.3.0.dev2026040505"
+mojo = "==0.26.3.0.dev2026040905"
