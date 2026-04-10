@@ -19,11 +19,14 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
     MCPU_FLAG="--mcpu haswell"
 fi
 
-# GPU target. Override with SEARCH_ACCEL="" for CPU-only builds.
+# GPU target: Darwin arm64 → metal:4, Linux x86_64 → sm_90 (H100/H200).
+# Override with SEARCH_ACCEL="" or SEARCH_ACCEL="--target-accelerator sm_80" etc.
 ACCEL_FLAG="${SEARCH_ACCEL-}"
 if [ -z "${SEARCH_ACCEL+x}" ]; then
     if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         ACCEL_FLAG="--target-accelerator metal:4"
+    elif [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
+        ACCEL_FLAG="--target-accelerator sm_90"
     fi
 fi
 

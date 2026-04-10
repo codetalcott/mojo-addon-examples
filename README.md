@@ -113,6 +113,9 @@ V8's JIT compiler is already fast for scalar code. The matmul example shows this
 
 - [pixi](https://prefix.dev/docs/pixi/) with Mojo nightly
 - Node.js 18+
+- **For GPU benchmarks on Apple Silicon:** Xcode with the Metal Toolchain component installed (`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer && xcodebuild -downloadComponent MetalToolchain`). Builds default to `--target-accelerator metal:4` on Darwin arm64; override per-addon with `STATS_ACCEL=""` etc. to build CPU-only.
+- **For GPU benchmarks on Linux/NVIDIA:** builds default to `--target-accelerator sm_90` (H100/H200). For other NVIDIA architectures, set `STATS_ACCEL="--target-accelerator sm_80"` (A100), `sm_89` (L40/RTX40), etc.
+- **Rented cloud GPU walkthrough:** see [docs/cloud-benchmark-runbook.md](docs/cloud-benchmark-runbook.md) for a ~30-minute Lambda Cloud H100 benchmark flow.
 
 ## Quick Start
 

@@ -20,12 +20,17 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
 fi
 
 # GPU target: Mojo needs --target-accelerator for heterogeneous compilation.
-# Darwin arm64 → metal:4 (covers M1-M4). Override with STATS_ACCEL="" to
-# build CPU-only (e.g. on a box without a GPU toolchain).
+# Defaults:
+#   Darwin arm64  → metal:4  (covers M1-M4)
+#   Linux x86_64  → sm_90    (NVIDIA Hopper — H100/H200; override for other NVIDIA via STATS_ACCEL)
+# Override with STATS_ACCEL="" to build CPU-only, or with a specific flag like
+# STATS_ACCEL="--target-accelerator sm_80" for A100, "sm_100a" for B100/B200, etc.
 ACCEL_FLAG="${STATS_ACCEL-}"
 if [ -z "${STATS_ACCEL+x}" ]; then
     if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         ACCEL_FLAG="--target-accelerator metal:4"
+    elif [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
+        ACCEL_FLAG="--target-accelerator sm_90"
     fi
 fi
 
