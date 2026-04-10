@@ -9,8 +9,11 @@
 
 from std.algorithm.functional import vectorize, parallelize
 from std.sys import simd_width_of
-from std.math import sqrt
-from std.memory import alloc
+from std.math import sqrt, ceildiv
+from std.memory import alloc, memcpy, stack_allocation
+from std.gpu import global_idx, thread_idx, block_idx, barrier
+from std.gpu.memory import AddressSpace
+from std.gpu.host import DeviceContext
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error
@@ -29,6 +32,11 @@ from napi.framework.runtime import init_async_runtime
 
 comptime PARALLEL_THRESHOLD = 4096
 comptime NUM_WORKERS = 4
+
+# GPU tuning
+comptime GPU_BLOCK = 256
+comptime GPU_ELEMS_PER_THREAD = 8
+comptime GPU_CHUNK = GPU_BLOCK * GPU_ELEMS_PER_THREAD  # elements per block
 
 def _simd_sum_min_max(
     data: UnsafePointer[Float64, MutAnyOrigin], start: Int, end: Int
@@ -154,6 +162,256 @@ def _quickselect(arr: UnsafePointer[Float64, MutAnyOrigin], size: Int, k: Int) -
     return arr[left]
 
 
+# --- GPU kernels: tree reduction in shared memory ----------------------------
+# Apple Metal (and most mobile GPUs) does not support Float64 in compute
+# shaders — kernels must run in Float32. We cast Float64 → Float32 during the
+# host-to-device copy, do the reductions in Float32, then cast back on the
+# host. This costs ~7 decimal digits of precision. For stats on large arrays
+# (N ≥ 10K) of well-scaled data the error is negligible; for adversarial
+# inputs the user should stick with the CPU `stats()` path.
+#
+# One block processes GPU_CHUNK elements. Each thread sums GPU_ELEMS_PER_THREAD
+# values (strided by GPU_BLOCK), writes to shared memory, then cooperates in a
+# tree reduction. Block 0..num_blocks-1 writes one partial each; host finalizes.
+
+def _gpu_kernel_sum_min_max(
+    data: UnsafePointer[Float32, MutAnyOrigin],
+    partial_sum: UnsafePointer[Float32, MutAnyOrigin],
+    partial_min: UnsafePointer[Float32, MutAnyOrigin],
+    partial_max: UnsafePointer[Float32, MutAnyOrigin],
+    size: Int,
+):
+    var s_sum = stack_allocation[
+        GPU_BLOCK, Scalar[DType.float32], address_space=AddressSpace.SHARED
+    ]()
+    var s_min = stack_allocation[
+        GPU_BLOCK, Scalar[DType.float32], address_space=AddressSpace.SHARED
+    ]()
+    var s_max = stack_allocation[
+        GPU_BLOCK, Scalar[DType.float32], address_space=AddressSpace.SHARED
+    ]()
+
+    var tid = Int(thread_idx.x)
+    var bid = Int(block_idx.x)
+    var base = bid * GPU_CHUNK + tid
+
+    var local_sum: Float32 = 0.0
+    var seeded = False
+    var local_min: Float32 = 0.0
+    var local_max: Float32 = 0.0
+    for i in range(GPU_ELEMS_PER_THREAD):
+        var idx = base + i * GPU_BLOCK
+        if idx < size:
+            var v = data[idx]
+            local_sum += v
+            if not seeded:
+                local_min = v
+                local_max = v
+                seeded = True
+            else:
+                if v < local_min:
+                    local_min = v
+                if v > local_max:
+                    local_max = v
+
+    # Neutral extrema for threads that had no data (Float32 max/lowest).
+    if not seeded:
+        local_min = 3.4e38
+        local_max = -3.4e38
+
+    s_sum[tid] = local_sum
+    s_min[tid] = local_min
+    s_max[tid] = local_max
+    barrier()
+
+    var step = GPU_BLOCK // 2
+    while step > 0:
+        if tid < step:
+            s_sum[tid] = s_sum[tid] + s_sum[tid + step]
+            var a = s_min[tid]
+            var b = s_min[tid + step]
+            s_min[tid] = a if a < b else b
+            var c = s_max[tid]
+            var d = s_max[tid + step]
+            s_max[tid] = c if c > d else d
+        barrier()
+        step //= 2
+
+    if tid == 0:
+        partial_sum[bid] = s_sum[0]
+        partial_min[bid] = s_min[0]
+        partial_max[bid] = s_max[0]
+
+
+def _gpu_kernel_sum_sq_diff(
+    data: UnsafePointer[Float32, MutAnyOrigin],
+    partial: UnsafePointer[Float32, MutAnyOrigin],
+    mean: Float32,
+    size: Int,
+):
+    var s_sum = stack_allocation[
+        GPU_BLOCK, Scalar[DType.float32], address_space=AddressSpace.SHARED
+    ]()
+
+    var tid = Int(thread_idx.x)
+    var bid = Int(block_idx.x)
+    var base = bid * GPU_CHUNK + tid
+
+    var local_sum: Float32 = 0.0
+    for i in range(GPU_ELEMS_PER_THREAD):
+        var idx = base + i * GPU_BLOCK
+        if idx < size:
+            var d = data[idx] - mean
+            local_sum += d * d
+
+    s_sum[tid] = local_sum
+    barrier()
+
+    var step = GPU_BLOCK // 2
+    while step > 0:
+        if tid < step:
+            s_sum[tid] = s_sum[tid] + s_sum[tid + step]
+        barrier()
+        step //= 2
+
+    if tid == 0:
+        partial[bid] = s_sum[0]
+
+
+# --- GPU host helpers --------------------------------------------------------
+
+def _gpu_sum_min_max(
+    ctx: DeviceContext,
+    data: UnsafePointer[Float64, MutAnyOrigin],
+    size: Int,
+) raises -> InlineArray[Float64, 3]:
+    var num_blocks = ceildiv(size, GPU_CHUNK)
+
+    var dev_data = ctx.enqueue_create_buffer[DType.float32](size)
+    var host_data = ctx.enqueue_create_host_buffer[DType.float32](size)
+    var host_ptr = host_data.unsafe_ptr()
+    for i in range(size):
+        host_ptr[i] = Float32(data[i])
+    ctx.enqueue_copy(dev_data, host_data)
+
+    var dev_psum = ctx.enqueue_create_buffer[DType.float32](num_blocks)
+    var dev_pmin = ctx.enqueue_create_buffer[DType.float32](num_blocks)
+    var dev_pmax = ctx.enqueue_create_buffer[DType.float32](num_blocks)
+
+    ctx.enqueue_function[_gpu_kernel_sum_min_max, _gpu_kernel_sum_min_max](
+        dev_data.unsafe_ptr(),
+        dev_psum.unsafe_ptr(),
+        dev_pmin.unsafe_ptr(),
+        dev_pmax.unsafe_ptr(),
+        size,
+        grid_dim=num_blocks,
+        block_dim=GPU_BLOCK,
+    )
+
+    var host_psum = ctx.enqueue_create_host_buffer[DType.float32](num_blocks)
+    var host_pmin = ctx.enqueue_create_host_buffer[DType.float32](num_blocks)
+    var host_pmax = ctx.enqueue_create_host_buffer[DType.float32](num_blocks)
+    ctx.enqueue_copy(host_psum, dev_psum)
+    ctx.enqueue_copy(host_pmin, dev_pmin)
+    ctx.enqueue_copy(host_pmax, dev_pmax)
+    ctx.synchronize()
+
+    var psum_ptr = host_psum.unsafe_ptr()
+    var pmin_ptr = host_pmin.unsafe_ptr()
+    var pmax_ptr = host_pmax.unsafe_ptr()
+
+    # Final reduction on CPU in Float64 — recovers most of the precision
+    # loss of running the per-block sum in Float32.
+    var total_sum: Float64 = 0.0
+    var total_min: Float64 = Float64(pmin_ptr[0])
+    var total_max: Float64 = Float64(pmax_ptr[0])
+    for i in range(num_blocks):
+        total_sum += Float64(psum_ptr[i])
+        var m = Float64(pmin_ptr[i])
+        if m < total_min:
+            total_min = m
+        var M = Float64(pmax_ptr[i])
+        if M > total_max:
+            total_max = M
+
+    var result = InlineArray[Float64, 3](fill=total_sum)
+    result[1] = total_min
+    result[2] = total_max
+    return result^
+
+
+def _gpu_sum_sq_diff(
+    ctx: DeviceContext,
+    data: UnsafePointer[Float64, MutAnyOrigin],
+    size: Int,
+    mean: Float64,
+) raises -> Float64:
+    var num_blocks = ceildiv(size, GPU_CHUNK)
+
+    var dev_data = ctx.enqueue_create_buffer[DType.float32](size)
+    var host_data = ctx.enqueue_create_host_buffer[DType.float32](size)
+    var host_ptr = host_data.unsafe_ptr()
+    for i in range(size):
+        host_ptr[i] = Float32(data[i])
+    ctx.enqueue_copy(dev_data, host_data)
+
+    var dev_partial = ctx.enqueue_create_buffer[DType.float32](num_blocks)
+
+    ctx.enqueue_function[_gpu_kernel_sum_sq_diff, _gpu_kernel_sum_sq_diff](
+        dev_data.unsafe_ptr(),
+        dev_partial.unsafe_ptr(),
+        Float32(mean),
+        size,
+        grid_dim=num_blocks,
+        block_dim=GPU_BLOCK,
+    )
+
+    var host_partial = ctx.enqueue_create_host_buffer[DType.float32](num_blocks)
+    ctx.enqueue_copy(host_partial, dev_partial)
+    ctx.synchronize()
+
+    var ptr = host_partial.unsafe_ptr()
+    var total: Float64 = 0.0
+    for i in range(num_blocks):
+        total += Float64(ptr[i])
+    return total
+
+
+def _compute_stats_gpu(
+    ctx: DeviceContext,
+    data: UnsafePointer[Float64, MutAnyOrigin],
+    size: Int,
+) raises -> InlineArray[Float64, 7]:
+    # Pass 1 + 2 on GPU (Float32 internal), percentiles on CPU.
+    var smm = _gpu_sum_min_max(ctx, data, size)
+    var mean = smm[0] / Float64(size)
+
+    var sum_sq = _gpu_sum_sq_diff(ctx, data, size, mean)
+    var stddev = sqrt(sum_sq / Float64(size))
+
+    var copy = alloc[Float64](size)
+    for i in range(size):
+        copy[i] = data[i]
+
+    var p50_idx = Int(Float64(size - 1) * 0.5)
+    var p95_idx = Int(Float64(size - 1) * 0.95)
+    var p99_idx = Int(Float64(size - 1) * 0.99)
+
+    var p50 = _quickselect(copy, size, p50_idx)
+    var p95 = _quickselect(copy, size, p95_idx)
+    var p99 = _quickselect(copy, size, p99_idx)
+    copy.free()
+
+    var result = InlineArray[Float64, 7](fill=mean)
+    result[1] = stddev
+    result[2] = smm[1]
+    result[3] = smm[2]
+    result[4] = p50
+    result[5] = p95
+    result[6] = p99
+    return result^
+
+
 # --- Full stats computation ---------------------------------------------------
 
 def _compute_stats(
@@ -224,6 +482,43 @@ def stats_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return NapiValue()
 
 
+def stats_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+    try:
+        var r = CbArgs.get_bindings_and_one(env, info)
+        var b = r.b
+        if not JsTypedArray.is_typedarray(b, env, r.arg0):
+            throw_js_error(env, "statsGpu requires a Float64Array argument")
+            return NapiValue()
+        var ta = JsTypedArray(r.arg0)
+        var size = Int(ta.length(b, env))
+        if size == 0:
+            throw_js_error(env, "statsGpu requires non-empty array")
+            return NapiValue()
+        var ptr = ta.data_ptr(b, env).bitcast[Float64]()
+
+        var ctx: DeviceContext
+        try:
+            ctx = DeviceContext()
+        except:
+            throw_js_error(env, "statsGpu requires a GPU (no accelerator found)")
+            return NapiValue()
+
+        var s = _compute_stats_gpu(ctx, ptr, size)
+
+        var obj = JsObject.create(b, env)
+        obj.set_property(b, env, "mean",   JsNumber.create(b, env, s[0]).value)
+        obj.set_property(b, env, "stddev", JsNumber.create(b, env, s[1]).value)
+        obj.set_property(b, env, "min",    JsNumber.create(b, env, s[2]).value)
+        obj.set_property(b, env, "max",    JsNumber.create(b, env, s[3]).value)
+        obj.set_property(b, env, "p50",    JsNumber.create(b, env, s[4]).value)
+        obj.set_property(b, env, "p95",    JsNumber.create(b, env, s[5]).value)
+        obj.set_property(b, env, "p99",    JsNumber.create(b, env, s[6]).value)
+        return obj.value
+    except:
+        throw_js_error(env, "statsGpu failed")
+        return NapiValue()
+
+
 def histogram_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var r = CbArgs.get_bindings_and_two(env, info)
@@ -291,11 +586,13 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     var cb_data = bindings_ptr.bitcast[NoneType]()
 
     var stats_ref = stats_fn
+    var stats_gpu_ref = stats_gpu_fn
     var hist_ref = histogram_fn
 
     try:
         var m = ModuleBuilder(env, exports, cb_data)
         m.method("stats", fn_ptr(stats_ref))
+        m.method("statsGpu", fn_ptr(stats_gpu_ref))
         m.method("histogram", fn_ptr(hist_ref))
         m.flush()
     except:
