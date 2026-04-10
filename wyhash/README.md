@@ -11,7 +11,9 @@ Match C hash performance in ~50 lines of Mojo. The speed comes from 128-bit fold
 
 Accepts `Buffer`, `Uint8Array`, and optional seed as `Number` or `BigInt`.
 
-## Results (M4 Mac)
+## Results (M4 Mac, CPU)
+
+*CPU-only — `vectorize()` + `parallelize()`, no GPU.*
 
 | Function | 1KB | 64KB | 1MB | 16MB |
 |----------|-----|------|-----|------|

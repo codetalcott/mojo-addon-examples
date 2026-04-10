@@ -13,7 +13,9 @@ Four implementations showing Mojo's optimization story, from naive triple loop t
 
 All operate on row-major `Float64Array`s. JS passes pre-allocated output buffer for zero-allocation benchmarking.
 
-## Results (M4 Mac)
+## Results (M4 Mac, CPU)
+
+*CPU-only — `vectorize()` + `parallelize()`, no GPU.*
 
 | Step | 1024x1024 | 2048x2048 |
 |------|-----------|-----------|

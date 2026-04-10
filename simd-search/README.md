@@ -12,7 +12,9 @@ SIMD byte scanning that's impossible to express in pure JavaScript. XOR-based by
 
 Accepts both `Buffer` and `Uint8Array` inputs. Multi-byte `searchAll` uses a first+last byte SIMD filter to minimize full comparisons.
 
-## Results (M4 Mac)
+## Results (M4 Mac, CPU)
+
+*CPU-only — `vectorize()` + `parallelize()`, no GPU.*
 
 | Function | 1MB | 16MB | 100MB |
 |----------|-----|------|-------|

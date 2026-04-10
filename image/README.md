@@ -13,7 +13,9 @@ Four RGBA pixel operations on Uint8Arrays. Integer-approximation grayscale, fixe
 
 All return a new `Uint8Array` and preserve the alpha channel.
 
-## Results (M4 Mac)
+## Results (M4 Mac, CPU)
+
+*CPU-only — `vectorize()` + `parallelize()`, no GPU.*
 
 | Function | 720p | 1080p | 4K |
 |----------|------|-------|-----|

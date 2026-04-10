@@ -4,6 +4,8 @@ High-performance Node.js addon examples built with [napi-mojo](https://github.co
 
 ## Examples
 
+> **Benchmarking scope:** All numbers below are **CPU-only**, measured on an Apple M4 using Mojo's `vectorize()` (SIMD) and `parallelize()` (multi-core) primitives. Mojo's GPU programming model is a separate capability that these examples don't exercise — the comparisons here are against V8 on the same CPU cores, not against GPU-accelerated baselines.
+
 ### Matrix Multiply — Progressive Optimization
 
 Four implementations showing Mojo's optimization story, from naive triple loop to SIMD + tiled + parallel:
@@ -12,7 +14,7 @@ Four implementations showing Mojo's optimization story, from naive triple loop t
 node matmul/matmul.js
 ```
 
-**Results (M4 Mac, Float64):**
+**Results (M4 Mac, CPU, Float64):**
 
 | Step | 1024x1024 | 2048x2048 | Mojo Feature |
 |------|-----------|-----------|-------------|
@@ -30,7 +32,7 @@ SIMD byte scanning that's impossible to express in pure JavaScript. Three functi
 node simd-search/search.js
 ```
 
-**Results (M4 Mac, Buffer/Uint8Array):**
+**Results (M4 Mac, CPU, Buffer/Uint8Array):**
 
 | Function | 1MB | 16MB | 100MB | Mojo Feature |
 |----------|-----|------|-------|-------------|
@@ -47,7 +49,7 @@ Compute `{mean, stddev, min, max, p50, p95, p99}` on Float64Arrays in a single c
 node stats/stats.js
 ```
 
-**Results (M4 Mac, Float64):**
+**Results (M4 Mac, CPU, Float64):**
 
 | Function | 100K | 1M | 10M | Mojo Feature |
 |----------|------|-----|-----|-------------|
@@ -62,7 +64,7 @@ Four RGBA pixel operations on Uint8Arrays: `grayscale`, `brightness`, `threshold
 node image/image.js
 ```
 
-**Results (M4 Mac, RGBA Uint8Array):**
+**Results (M4 Mac, CPU, RGBA Uint8Array):**
 
 | Function | 720p | 1080p | 4K | Mojo Feature |
 |----------|------|-------|-----|-------------|
@@ -79,7 +81,7 @@ Match C hash performance in ~50 lines of Mojo. `wyHash` returns BigInt (full 64-
 node wyhash/hash.js
 ```
 
-**Results (M4 Mac, Buffer):**
+**Results (M4 Mac, CPU, Buffer):**
 
 | Function | 1KB | 64KB | 1MB | 16MB | Mojo Feature |
 |----------|-----|------|-----|------|-------------|

@@ -9,7 +9,9 @@ Compute `{mean, stddev, min, max, p50, p95, p99}` on Float64Arrays in a single N
 | `stats(data)` | Full summary stats | SIMD reduce_add/min/max, `parallelize()` |
 | `histogram(data, bins)` | Bin counts as `Float64Array` | SIMD min/max range detection |
 
-## Results (M4 Mac)
+## Results (M4 Mac, CPU)
+
+*CPU-only — `vectorize()` + `parallelize()`, no GPU.*
 
 | Function | 100K | 1M | 10M |
 |----------|------|-----|-----|
