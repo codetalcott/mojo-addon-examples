@@ -4,7 +4,7 @@ High-performance Node.js addon examples built with [napi-mojo](https://github.co
 
 ## Examples
 
-> **Benchmarking scope:** The primary CPU numbers in each table below are measured on an Apple M4. GPU rows report the M4's integrated GPU via Metal 4. A separate [H100 Cloud Benchmark Results](#h100-cloud-benchmark-results) section below reports results from an NVIDIA H100 80GB HBM3 (rented via RunPod). **Headline finding from the cloud run: Mojo CPU SIMD beats Mojo GPU on every benchmark — on both M4 Metal *and* H100 CUDA.** These addons call the GPU as one-shot N-API functions against host-resident data, which is PCIe-bound rather than HBM-bound. See [per-addon READMEs](#statistics--simd-aggregation) and the H100 section below for the full teardown.
+> **Benchmarking scope:** The primary CPU numbers in each table below are measured on an Apple M4. GPU rows report the M4's integrated GPU via Metal 4. A separate [H100 Cloud Benchmark Results](#h100-cloud-benchmark-results) section below reports results from an NVIDIA H100 80GB HBM3 (rented via RunPod). **Headline finding from the cloud runs**: for the single-shot GPU APIs that upload on every call, Mojo CPU SIMD beats Mojo GPU on every benchmark — on both M4 Metal *and* H100 CUDA — because the workload is PCIe-bound rather than HBM-bound. **Phase 3a flipped this** with a new persistent device buffer API (`loadGpu` / `countByteHandle` / `releaseGpu` in [simd-search](#simd-text-search--byte-level-pattern-matching)): on H100 the cached path reaches **1030× JS on 105 MB countByte, beating CPU SIMD by 30×**. See the [H100 Cloud Benchmark Results](#h100-cloud-benchmark-results) section and per-addon READMEs for the full teardown.
 
 ### Matrix Multiply — Progressive Optimization
 
@@ -142,6 +142,34 @@ AVX-512 byte scanning on Xeon Sapphire Rapids is brutal for this workload — 89
 3. **Higher arithmetic intensity.** Matmul (O(n³) compute on O(n²) data), convolution, attention — anything where the compute cost dominates the transfer cost. Stats, grayscale, and countByte are all ≤1 op per byte, the worst possible ratio for any GPU on a PCIe link.
 
 All three are Phase 3 candidate work. See [docs/cloud-benchmark-runbook.md](docs/cloud-benchmark-runbook.md) to reproduce these numbers (~$1, ~30 minutes on RunPod), and the per-addon READMEs for deeper teardowns.
+
+## Phase 3a Cloud Benchmark Results — persistent buffers flipped the result
+
+Phase 3a shipped a new `search_cached.node` addon with a handle-based API that uploads a buffer to device memory once and reuses it across many queries. Same kernel, same benchmark data, new API shape. **It works** — and the magnitude of the win was bigger than predicted.
+
+### countByte on H100, 4-path comparison
+
+| Size | CPU SIMD | GPU one-shot | **GPU cached** | Cached per-call |
+|------|---------:|-------------:|---------------:|----------------:|
+| 1 MB   | 20.9× |  9.2× |      51.0× |  ~18 μs |
+| 17 MB  | 42.9× | 11.3× | **527.8×** |  ~29 μs |
+| 105 MB | 33.9× |  5.3× | **1030.7×** | ~94 μs |
+
+*Speedups relative to V8 JS on the same H100 host. Validated 2026-04-11 on RunPod, H100 80GB HBM3.*
+
+**At 17 MB, GPU cached beats CPU SIMD by 12×. At 105 MB, GPU cached beats CPU SIMD by 30×.** This is the first time anywhere in the project that Mojo GPU has beaten Mojo CPU SIMD on a byte-scan benchmark, and the kernel itself is unchanged from the Phase 2c one-shot version. The entire improvement came from changing the API shape: upload once, query many times.
+
+### Why it worked
+
+- **105 MB in 94 μs = 1.1 TB/s effective bandwidth** — roughly 37% of the H100's 3 TB/s HBM3 peak. Excellent efficiency for a byte-scan kernel with shared-memory tree reduction.
+- **PCIe is no longer on the hot path.** `loadGpu(105MB)` pays the ~17 ms PCIe transfer exactly once; every subsequent `countByteHandle` call stays entirely on the GPU, reading from device memory at HBM3 speed. Break-even on the upload is reached after a **single reuse**.
+- **CPU SIMD is still bounded by host DRAM at ~42 GB/s effective.** HBM3 is ~70× faster once you actually use it. On the one-shot API you can't — on the cached API you can.
+
+### Phase 2d's diagnosis was correct
+
+The Phase 2d H100 run was valuable precisely *because* it was "negative": it identified PCIe as the bottleneck instead of compute, and that diagnosis is what made Phase 3a targeted rather than speculative. The one-shot `countByteGpu` still loses to CPU SIMD on H100 — that hasn't changed. What Phase 3a added is a parallel handle-based API for the workload shape where the loss doesn't have to happen.
+
+See [simd-search/README.md](simd-search/README.md) for the full API, 5-size table with `loadGpu` upload costs, break-even analysis, and the "when to use the handle API" decision rule. Phase 3b (extend the pattern to stats and image) and Phase 3c (tensor-core matmul) are now justified by the 3a result.
 
 ## When to Use Mojo
 

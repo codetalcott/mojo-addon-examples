@@ -47,9 +47,76 @@ At the time this was written we predicted the pattern would flip on H100 (3TB/s 
 
 **What would make H100 win byte scanning** (Phase 3 candidate): a persistent device-resident buffer API (upload a dataset once, query it N times), or batched countByte that processes multiple queries in a single kernel launch against already-loaded data.
 
+## Phase 3a: Persistent Device Buffers (validated on H100, 2026-04-11)
+
+Phase 3a.1 shipped a prototype `search_cached.node` exposing a new handle-based API that uploads a buffer to device memory once and reuses it across many queries, amortizing PCIe transfer and per-call allocation. **The hypothesis — that this flips the H100 result — validated dramatically**.
+
+### API
+
+```js
+const cached = require('./build/search_cached.node');
+
+const buf = fs.readFileSync('big-log.txt');     // e.g. 100 MB
+const h = cached.loadGpu(buf);                  // one-shot upload to device
+
+// Many queries against the resident buffer, no per-call H2D copy
+for (const byte of [0x0A, 0x41, 0x2E, 0x20]) {
+  const n = cached.countByteHandle(h, byte);    // ~94 μs each at 105 MB
+  console.log(byte, n);
+}
+
+cached.releaseGpu(h);                           // tombstones handle
+```
+
+- `loadGpu(buf)` returns an N-API `External` handle with a finalize callback; the underlying `DeviceBuffer` is released when the handle becomes unreachable (or sooner if you call `releaseGpu`).
+- `countByteHandle(handle, targetByte)` launches the same tree-reduction kernel used by the existing one-shot `countByteGpu`, but against already-resident memory and a pre-allocated partial-sums buffer. No per-call allocation, no H2D copy, no `free()`.
+- `releaseGpu(handle)` marks the handle invalid so subsequent queries throw; actual memory reclaim happens on the next GC pass or process exit.
+
+### Results (NVIDIA H100 80GB HBM3, via RunPod)
+
+Four paths, same buffer sizes as the other simd-search rows:
+
+| Size | CPU SIMD (AVX-512) | GPU one-shot | **GPU cached** | Cached per-call | `loadGpu` one-time |
+|------|-------------------:|-------------:|---------------:|----------------:|-------------------:|
+| 1 KB   |    3.7× |   0.1× |      0.1× |  ~16 μs | 0.0 ms |
+| 66 KB  |    5.9× |   1.6× |      3.2× |  ~18 μs | 0.0 ms |
+| 1 MB   |   20.9× |   9.2× |     51.0× |  ~18 μs | 0.1 ms |
+| 17 MB  |   42.9× |  11.3× | **527.8×** |  ~29 μs | 1.4 ms |
+| 105 MB |   33.9× |   5.3× | **1030.7×** | ~94 μs | 17.2 ms |
+
+*Speedups are relative to V8 JS on the same H100 host.*
+
+**At 17 MB, GPU cached beats CPU SIMD by 12×. At 105 MB, GPU cached beats CPU SIMD by 30×.** This is the first time anywhere in the project that Mojo GPU has beaten Mojo CPU SIMD on a byte-scan benchmark, and it happened without changing the kernel at all — only the API shape.
+
+### Why this flipped the result
+
+- **105 MB in 94 μs = 1.1 TB/s effective bandwidth** — roughly 37% of H100's 3 TB/s HBM3 peak. Excellent efficiency for a byte-scan kernel with shared-memory tree reduction.
+- **17 MB in 29 μs = 586 GB/s effective** — lower efficiency because kernel-launch overhead is proportionally larger at smaller sizes, but still ~14× the ~42 GB/s AVX-512 DRAM bandwidth on the same host.
+- **Small buffers (1 KB, 66 KB) don't win** because per-call cost is bounded below by kernel launch (~15 μs on H100), which is comparable to what CPU SIMD finishes the whole count in.
+- **The one-shot `countByteGpu` row is unchanged** — it still pays the full PCIe round trip each call. Persistent buffers are a strict superset API: users who want single-call semantics keep using `countByteGpu`; users who plan to query the same data many times use the handle API.
+
+### When to use the handle API
+
+The decision is a straight break-even on reused queries. The persistent path wins when:
+
+```
+N * (one_shot_cost - cached_cost)  >  loadGpu_cost
+```
+
+From the numbers above, one-shot `countByteGpu` at 105 MB is ~18 ms per call, cached is ~0.094 ms per call, so each reuse saves ~18 ms. `loadGpu` for 105 MB is 17.2 ms. Break-even at **N ≥ 1** — even a single reuse pays for the upload. At 17 MB, break-even is also **N ≥ 1** (saves ~1.3 ms per call vs 1.4 ms upload). Anything less trivial than a one-shot scan is a win.
+
+The one case where the handle API isn't worth it is small buffers where one-shot is already fast enough — anything under ~64 KB is dominated by kernel launch overhead either way, and the API ceremony isn't worth it. Use `countByteGpu` directly for those.
+
+### What carries over to Phase 3b
+
+The same pattern (cached device buffer + pre-allocated result destination + N-API handle with GC finalizer) generalizes to stats and grayscale with minimal change — **Phase 3b** will port those two kernels using the same template, once the M4 performance regression in this prototype is understood (M4 Metal shows a ~2× slowdown when two addons each open their own DeviceContext; H100 CUDA does not share this constraint).
+
 ## Build & Run
 
 ```bash
-pixi run bash simd-search/build.sh
-node simd-search/search.js
+pixi run bash simd-search/build.sh          # existing, one-shot API
+pixi run bash simd-search/build_cached.sh   # Phase 3a persistent-buffer prototype
+node simd-search/search.js                  # existing benchmark
+node simd-search/search_cached.js           # 4-path comparison (JS / CPU SIMD / GPU one-shot / GPU cached)
+node simd-search/test_cached.js             # regression + leak smoke test
 ```

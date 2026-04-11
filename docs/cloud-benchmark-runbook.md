@@ -167,10 +167,51 @@ None of those are in scope for Phase 2. They are candidate Phase 3 work.
 
 **The runbook below still works** — you can reproduce these numbers on any H100 or A100 in ~15 minutes for ~$1, and you can use it to validate your own setups or test Phase 3 improvements.
 
+## Phase 3a validation (2026-04-11, H100 80GB HBM3 via RunPod)
+
+Phase 3a.1 shipped `search_cached.node` — a new simd-search addon exposing a handle-based API (`loadGpu`, `countByteHandle`, `releaseGpu`) that uploads a buffer once and reuses it across many queries. We ran the new benchmark on H100 to test the hypothesis that persistent device buffers flip the Phase 2d result.
+
+**Decision gate**: cached GPU at 17MB ≥ 200× JS AND ≥ 1.5× CPU SIMD.
+
+**Actual result**:
+
+| Size | CPU SIMD | GPU one-shot | **GPU cached** | Cached per-call |
+|------|---------:|-------------:|---------------:|----------------:|
+| 1 MB   | 20.9× |  9.2× |      51.0× |  ~18 μs |
+| 17 MB  | 42.9× | 11.3× | **527.8×** |  ~29 μs |
+| 105 MB | 33.9× |  5.3× | **1030.7×** | ~94 μs |
+
+Both gates cleared with huge margins: 17 MB cached hit 527.8× JS (2.6× the gate) and **12.3× CPU SIMD** (8× the gate). **Phase 3a hypothesis validated.**
+
+At 105 MB the cached path hits **1.1 TB/s effective bandwidth** — about 37% of the H100's 3 TB/s HBM3 peak. That's the highest arithmetic efficiency observed anywhere in this project, for a byte-scan kernel that until this phase was assumed to be a bad fit for GPU entirely.
+
+**What Phase 3a validated, narrowly**: persistent device buffers flip the *single-shot PCIe bottleneck*, not any magical GPU speedup. The kernel itself is unchanged from Phase 2c. The entire improvement came from amortizing `loadGpu` across reuses. If you port a kernel to GPU and don't expose a persistent-buffer path, you will see the Phase 2c numbers: GPU loses to CPU SIMD on host-resident one-shot inputs.
+
+**What Phase 3a did not validate**: whether the same pattern ports cleanly to stats (Float64 → Float32 cast on two passes) or grayscale (elementwise with round-trip D2H). Those are Phase 3b work — the template exists but needs to be translated.
+
+### Reproducing Phase 3a
+
+The standard bootstrap block above builds `search_cached.node` automatically only if you add it to the build list. Add these lines to the bootstrap between the existing builds and the benchmark section:
+
+```bash
+pixi run bash simd-search/build_cached.sh
+
+echo ""                                               >> ~/bench-output.txt
+echo "=== CACHED REGRESSION TEST ==="                 >> ~/bench-output.txt
+node simd-search/test_cached.js                       >> ~/bench-output.txt 2>&1
+
+echo ""                                               >> ~/bench-output.txt
+echo "=== SEARCH_CACHED BENCHMARK (PHASE 3a) ==="     >> ~/bench-output.txt
+node simd-search/search_cached.js                     >> ~/bench-output.txt 2>&1
+```
+
+**Paste caveat observed during the 3a run**: RunPod's web terminal dropped several lines in the middle of a large paste block, leaving the bash session in a broken state that silently aborted after `npm test`. If you see the bootstrap stall or the output file stop growing mid-run, don't re-run the whole bootstrap — open a second web terminal and run the remaining commands directly from `/mojo-addon-examples` (the pod's PWD after git clone). The build outputs are persistent.
+
 ### Troubleshooting signals
 
-If your results come back dramatically different from the table above, something is off:
+If your results come back dramatically different from the Phase 2d or Phase 3a tables above, something is off:
 
-- **GPU column much faster than CPU SIMD**: you may have accidentally benchmarked device-resident data, or Phase 3 improvements landed and should be documented.
-- **GPU column much slower than above** (e.g. stats 10M < 2× JS): `DeviceContext` is probably being recreated per call. Check the instance_data caching path in the addon's `register_module`.
+- **`countByteHandle` cached column much slower than 500× JS at 17MB**: `DeviceContext` is probably being recreated per query, or the partial-sums buffer isn't pinned. Check `_count_byte_cached` in [simd-search/addon_cached.mojo](../simd-search/addon_cached.mojo) — the only per-call work should be `enqueue_function`, `enqueue_copy` of the partial sums, and `synchronize`.
+- **One-shot GPU column much slower than above** (e.g. stats 10M < 2× JS): `DeviceContext` is probably being recreated per call in the one-shot addon. Check the instance_data caching path in that addon's `register_module`.
 - **`Context leak detected` warnings in stderr**: N-API finalizer for the cached `DeviceContext` is misbehaving. Not fatal but investigate.
+- **Cached RSS growing on `test_cached.js` leak smoke**: expected *without* `--expose-gc` — the finalizer only fires during GC. With `--expose-gc` we observed zero growth on H100. M4 Metal shows ~1 MB/iter growth even with `--expose-gc`, which is the symptom of an M4-specific leak path we haven't root-caused yet; not blocking because the benchmark binds the handle in a single long-lived variable.
