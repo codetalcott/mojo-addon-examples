@@ -171,6 +171,57 @@ The Phase 2d H100 run was valuable precisely *because* it was "negative": it ide
 
 See [simd-search/README.md](simd-search/README.md) for the full API, 5-size table with `loadGpu` upload costs, break-even analysis, and the "when to use the handle API" decision rule. Phase 3b (extend the pattern to stats and image) and Phase 3c (tensor-core matmul) are now justified by the 3a result.
 
+## Phase 3b Cloud Benchmark Results — persistent buffers ported to grayscale and stats
+
+Phase 3b tested whether the Phase 3a persistent-buffer template generalizes beyond reductions. Two new cached addons:
+
+- [`image_cached.node`](image/addon_cached.mojo) — `loadImageGpu` + `grayscaleHandle(h, dst)` + `releaseImageGpu`. Transform kernel shape (output same size as input).
+- [`stats_cached.node`](stats/addon_cached.mojo) — `loadStatsGpu` + `statsHandle(h)` + `releaseStatsGpu`. Two reduction passes, Float64 input, multi-field result, CPU-side percentiles.
+
+Both shipped with byte-exact correctness against the existing CPU paths (210 + 208 regression cases respectively) and run without crashes on M4. **H100 validation run**: 2026-04-11 on an H100 80GB HBM3 SXM5 via RunPod, same pod configuration as the Phase 3a run.
+
+### Phase 3a search_cached reproduces on SXM (sanity check)
+
+| Size   | CPU SIMD | GPU one-shot | **GPU cached** (PCIe, 3a) | **GPU cached** (SXM, 3b.3) |
+| ------ | -------: | -----------: | ------------------------: | -------------------------: |
+| 1 MB   |    62.1× |         9.2× |                     51.0× |                      53.5× |
+| 17 MB  |    93.4× |        12.4× |                    527.8× |                  **562.9×** |
+| 105 MB |    46.5× |         6.3× |                   1030.7× | **1146.4×** |
+
+SXM is +6–11% better than PCIe at the top sizes. Phase 3a reproduces cleanly.
+
+### Phase 3b.1 grayscale cached on H100
+
+| Resolution     | JS   | CPU SIMD | GPU one-shot | **GPU cached** | `loadImageGpu` |
+| -------------- | ---- | -------- | ------------ | -------------- | -------------- |
+| 720p (3.7 MB)  | 1.0× | 5.6×     | 2.0×         | **11.9×**      | 0.3 ms         |
+| 1080p (8.3 MB) | 1.0× | 6.4×     | 2.0×         | **12.6×**      | 0.8 ms         |
+| 4K (33.2 MB)   | 1.0× | 6.3×     | 1.7×         | **7.4×**       | 4.9 ms         |
+
+**Result: template works, absolute speedup is small.** Cached beats GPU one-shot 4–6× at every resolution and beats CPU SIMD 1.2–2.1×. Break-even vs one-shot is 1 iteration. But the headline number at 4K (7.4× JS) is well below the Phase 3a countByte 105 MB result (1146× JS) — not because the template failed, but because grayscale is a transform with a per-call 33 MB D2H that can't be amortized. The strategy doc's risk #1 flagged this before the run: "grayscale output is the same size as the input... every `grayscaleHandle` call still pays ~3 ms of D2H at 4K. Cached GPU should beat CPU SIMD but by a much smaller margin than countByte — maybe 3-5× instead of 30×." Observed: 1.2× at 4K. Directionally correct, below the predicted ceiling.
+
+See [image/README.md](image/README.md#phase-3b1--cached-grayscale-api-nvidia-h100-80gb-hbm3) for the full teardown.
+
+### Phase 3b.2 stats cached on H100
+
+| Size | JS   | CPU SIMD | GPU one-shot | **GPU cached** | `loadStatsGpu` |
+| ---- | ---- | -------- | ------------ | -------------- | -------------- |
+| 100K | 1.0× | 8.4×     | 7.0×         | **8.1×**       | 0.1 ms         |
+| 1M   | 1.0× | 7.5×     | 7.1×         | **8.1×**       | 1.0 ms         |
+| 10M  | 1.0× | 3.6×     | 3.4×         | **3.5×**       | 13.1 ms        |
+
+**Result: template works, percentile quickselect dominates at 10M.** The cached API replaces the per-call scalar Float64→Float32 cast with a vectorized one-time cast and eliminates per-call PCIe upload and device allocation. At 100K–1M, cached ties or slightly beats CPU SIMD. At 10M the CPU-side percentile quickselect (p50/p95/p99 on 10M Float64) swamps everything at ~200–300 ms per call, so cached saves ~15 ms of GPU-related work per call but the wall clock is dominated by percentiles — giving a 3.5× JS result that's effectively measuring quickselect, not the cached GPU reduction. Note how the JS→CPU-SIMD ratio itself drops from 7.5× at 1M to 3.6× at 10M for the same reason.
+
+See [stats/README.md](stats/README.md#phase-3b2--cached-stats-api-nvidia-h100-80gb-hbm3) for the full teardown.
+
+### What Phase 3b validated and what it didn't
+
+**Validated**: the persistent-buffer template ports to two additional kernel shapes (elementwise transform, two-pass Float64 reduction) without structural changes beyond copying ~150 lines of handle plumbing per addon. Both addons pass byte-exact correctness against the existing CPU SIMD oracles.
+
+**Did not validate**: a 100×-or-better speedup for either kernel. The strategy doc's ≥100× JS / ≥5× CPU SIMD Green decision gates are Red at 4K grayscale (physics: D2H floor) and Red at 10M stats (CPU percentile dominance). Neither is a template failure — both are workload-shape bottlenecks that persistent buffers can't address.
+
+**What the pattern is actually good for**: kernels where (a) output is small relative to input (reductions) and (b) the same input is queried many times. countByte hits both and wins 1000×. Grayscale hits (b) but not (a) and wins 1.2–12× depending on resolution. Stats hits (a) and (b) at small sizes but pays CPU-side percentile cost at large sizes. Matmul (Phase 3c target) hits (a) and (b) *and* has high arithmetic intensity — the prediction is that matmul will be the phase 3 headline result, not these two.
+
 ## When to Use Mojo
 
 V8's JIT compiler is already fast for scalar code. The matmul example shows this clearly: Mojo with the *same algorithm* is only 1.9-2.2x faster. A native addon has real costs -- build toolchain, N-API call overhead, platform-specific binaries. Mojo is worth reaching for when:

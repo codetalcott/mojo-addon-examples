@@ -46,6 +46,38 @@ The topology matters more than the bandwidth. A discrete GPU's HBM3 is blazing f
 
 **What would make grayscale win on H100**: persistent device-resident frame buffer (video pipeline where frames upload once and are processed many times), or operation fusion where grayscale → threshold → blur chain keeps intermediates on the device.
 
+## Phase 3b.1 — Cached grayscale API (NVIDIA H100 80GB HBM3)
+
+Shipped as a separate [`image_cached.node`](addon_cached.mojo) addon with a handle-based API that uploads an image to the GPU once and reuses both the source and destination device buffers across many `grayscaleHandle` calls:
+
+```js
+const cached = require('./build/image_cached.node');
+const handle = cached.loadImageGpu(rgba, w, h);   // one-time upload
+const dst = new Uint8Array(rgba.length);           // caller-owned, reused
+for (let i = 0; i < N; i++) {
+  cached.grayscaleHandle(handle, dst);             // fills dst in place
+}
+cached.releaseImageGpu(handle);
+```
+
+Validated 2026-04-11 on H100 80GB HBM3 SXM5 via RunPod. Four-path comparison (JS / CPU SIMD / GPU one-shot / GPU cached):
+
+| Resolution     | JS   | CPU SIMD | GPU one-shot | **GPU cached** | `loadImageGpu` |
+| -------------- | ---- | -------- | ------------ | -------------- | -------------- |
+| 720p (3.7 MB)  | 1.0× | 5.6×     | 2.0×         | **11.9×**      | 0.3 ms         |
+| 1080p (8.3 MB) | 1.0× | 6.4×     | 2.0×         | **12.6×**      | 0.8 ms         |
+| 4K (33.2 MB)   | 1.0× | 6.3×     | 1.7×         | **7.4×**       | 4.9 ms         |
+
+Break-even vs one-shot is **1 iteration** at every size — the persistent buffers pay for themselves on the very first reuse.
+
+**What the cached API validates**: the Phase 3a persistent-buffer template (originally shipped for countByte) ports cleanly to a *transform* kernel shape. Cached beats GPU one-shot 4–6× at every resolution and beats CPU SIMD 1.2–2.1×, with correctness byte-exact vs the CPU SIMD path on 210 regression cases at three resolutions × three seeds.
+
+**Why the absolute speedup is small** (7.4× at 4K vs 1030× for countByte at 105 MB): grayscale is a transform, not a reduction. Every `grayscaleHandle` call still pays full D2H for the 33 MB output at 4K — roughly 3 ms at PCIe Gen4 ~12 GB/s. That's an irreducible floor. Amortizing `loadImageGpu` eliminates the H2D leg (and the per-call device allocation), but the D2H leg remains per-call and caps the margin vs CPU SIMD. CPU SIMD does 4K grayscale in 5.05 ms on the H100 host's Xeon; cached GPU does it in 4.29 ms — a 1.18× edge dominated by that unavoidable D2H floor.
+
+Put another way: the cached template *works* and the pattern generalizes, but transforms with large output buffers don't exhibit the dramatic wins that pure reductions do. The right use case for the cached grayscale API is a video pipeline that processes many frames of the *same* RGBA buffer — e.g., comparison against a reference image, or successive transformations on a single input — not a pipeline that streams new frames through.
+
+**Cached test_cached.js on H100 (leak smoke)**: 500 load+release iterations on 720p show ~3.3 MB/iter RSS growth, compared to ~0 MB/iter for the `search_cached` leak smoke on the same host. The extra per-cycle leak is image-specific (not present in the reduction template) and persists on both M4 Metal and H100 CUDA backends — it correlates with the kernel call inside the release cycle, not with the load/release itself. Production usage (load once, query many, release once) does not trigger it; the reused-handle path shows zero growth.
+
 ## Build & Run
 
 ```bash

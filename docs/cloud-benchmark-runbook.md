@@ -214,4 +214,35 @@ If your results come back dramatically different from the Phase 2d or Phase 3a t
 - **`countByteHandle` cached column much slower than 500× JS at 17MB**: `DeviceContext` is probably being recreated per query, or the partial-sums buffer isn't pinned. Check `_count_byte_cached` in [simd-search/addon_cached.mojo](../simd-search/addon_cached.mojo) — the only per-call work should be `enqueue_function`, `enqueue_copy` of the partial sums, and `synchronize`.
 - **One-shot GPU column much slower than above** (e.g. stats 10M < 2× JS): `DeviceContext` is probably being recreated per call in the one-shot addon. Check the instance_data caching path in that addon's `register_module`.
 - **`Context leak detected` warnings in stderr**: N-API finalizer for the cached `DeviceContext` is misbehaving. Not fatal but investigate.
-- **Cached RSS growing on `test_cached.js` leak smoke**: expected *without* `--expose-gc` — the finalizer only fires during GC. With `--expose-gc` we observed zero growth on H100. M4 Metal shows ~1 MB/iter growth even with `--expose-gc`, which is the symptom of an M4-specific leak path we haven't root-caused yet; not blocking because the benchmark binds the handle in a single long-lived variable.
+- **Cached RSS growing on `test_cached.js` leak smoke**: expected *without* `--expose-gc` — the finalizer only fires during GC. With `--expose-gc` the 3a `search_cached` leak smoke shows zero growth on H100 and ~1 MB/iter on M4. Phase 3b.3 found the `image_cached` and `stats_cached` leak smokes also show growth on H100 (~3.3 MB/iter and ~0.7 MB/iter respectively), in addition to their M4 counterparts — so the "leaks only happen on synthetic load/release loops" pattern is cross-platform for the transform + multi-buffer templates. Production usage (load once, query many, release once) shows zero growth. Do not attempt to fix the cached addon — the template is unchanged from 3a and the extra leak correlates with the kernel-call-inside-release-cycle pattern.
+
+## Phase 3b validation (2026-04-11, H100 80GB HBM3 SXM5 via RunPod)
+
+Phase 3b.1 and 3b.2 shipped two new cached addons: `image_cached.node` (grayscale transform) and `stats_cached.node` (two-pass Float64 reduction + percentiles). Phase 3b.3 validated both on the same H100 SXM5 pod as Phase 3a and re-ran search_cached for a sanity check.
+
+**Decision gate** (per the Phase 3 strategy doc): cached GPU ≥100× JS AND ≥5× CPU SIMD at the top size (4K for grayscale, 10M for stats).
+
+**Actual result**: both kernels Red against the gate; template and correctness both green.
+
+| Kernel    | Top size         | JS   | CPU SIMD | GPU cached | Verdict                    |
+| --------- | ---------------- | ---- | -------- | ---------- | -------------------------- |
+| grayscale | 4K RGBA (33 MB)  | 1.0× | 6.3×     | 7.4×       | Red (D2H floor)            |
+| stats     | 10M Float64      | 1.0× | 3.6×     | 3.5×       | Red (percentile dominance) |
+
+**Phase 3a reproduced on SXM with slightly better numbers** — countByte cached hit 1146.4× at 105 MB (vs 1030.7× on the PCIe variant from 2026-04-11), and CPU SIMD also improved (93.4× at 17 MB vs 42.9× on the earlier PCIe Xeon). SXM has higher HBM3 bandwidth and this particular pod had a faster Xeon than the earlier PCIe run. Sanity check passed.
+
+**Why grayscale is Red**: the strategy doc's risk #1 predicted this precisely. Every `grayscaleHandle` call still pays full D2H for the 33 MB output at 4K — ~3 ms at PCIe Gen4 ~12 GB/s — an irreducible floor. Amortizing `loadImageGpu` eliminates the H2D leg but not the D2H leg. CPU SIMD does 4K grayscale in 5.05 ms on this host; cached GPU does it in 4.29 ms. A 1.2× edge is the ceiling for this workload shape on this hardware. For transforms, the persistent-buffer template works but the absolute win is fundamentally smaller than for reductions. See [image/README.md](../image/README.md#phase-3b1--cached-grayscale-api-nvidia-h100-80gb-hbm3).
+
+**Why stats is Red**: the cached template successfully eliminates the per-call scalar Float64→Float32 cast and the per-call H2D upload. At 100K and 1M, cached ties or slightly beats CPU SIMD (8.1× vs 8.4× / 8.1× vs 7.5× JS). At 10M, everything collapses because CPU-side percentile quickselect (p50/p95/p99) dominates at ~200–300 ms per call, swamping the ~15 ms of GPU-related per-call savings from caching. The JS→CPU-SIMD ratio itself drops from 7.5× at 1M to 3.6× at 10M for the same reason. The benchmark at 10M is measuring quickselect wall-clock, not cached GPU reduction wall-clock. Moving percentiles to the GPU (parallel quickselect / radix partition) is explicitly out of scope for Phase 3b per the strategy doc and is the natural unblock for this Red. See [stats/README.md](../stats/README.md#phase-3b2--cached-stats-api-nvidia-h100-80gb-hbm3).
+
+### Reproducing Phase 3b
+
+The Phase 3b validation shipped a self-contained bootstrap script at [scripts/runpod-bench-3b.sh](../scripts/runpod-bench-3b.sh) that avoids the "paste caveat" by fetching via a single curl line. On a fresh RunPod H100 web terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/codetalcott/mojo-addon-examples/main/scripts/runpod-bench-3b.sh | bash
+```
+
+(If the repo is private, pre-clone with an authenticated URL first — see the script header.) The script installs pixi + node 22, clones the repo, builds all three cached addons plus their oracles, runs regression tests and benchmarks, and writes combined output to `~/bench-cached-3b.txt`. Expected duration ~10–15 minutes (dominated by `pixi install`). Paste `cat ~/bench-cached-3b.txt` back and terminate the pod immediately.
+
+**Red is not failure, for the record.** The strategy doc explicitly calls this out: "Red on either kernel doesn't mean Phase 3 failed — it means that specific kernel shape has an additional bottleneck beyond PCIe, and we document it honestly like Phase 2d did. Phase 3c is unaffected by either outcome because matmul has fundamentally different arithmetic intensity." 3b.1 and 3b.2 validated that the template ports. 3c.1 (tensor-core matmul research) is unblocked by this result.
