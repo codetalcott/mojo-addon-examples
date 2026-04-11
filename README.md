@@ -4,7 +4,7 @@ High-performance Node.js addon examples built with [napi-mojo](https://github.co
 
 ## Examples
 
-> **Benchmarking scope:** All numbers below are **CPU-only**, measured on an Apple M4 using Mojo's `vectorize()` (SIMD) and `parallelize()` (multi-core) primitives. Mojo's GPU programming model is a separate capability that these examples don't exercise — the comparisons here are against V8 on the same CPU cores, not against GPU-accelerated baselines.
+> **Benchmarking scope:** The primary CPU numbers in each table below are measured on an Apple M4. GPU rows report the M4's integrated GPU via Metal 4. A separate [H100 Cloud Benchmark Results](#h100-cloud-benchmark-results) section below reports results from an NVIDIA H100 80GB HBM3 (rented via RunPod). **Headline finding from the cloud run: Mojo CPU SIMD beats Mojo GPU on every benchmark — on both M4 Metal *and* H100 CUDA.** These addons call the GPU as one-shot N-API functions against host-resident data, which is PCIe-bound rather than HBM-bound. See [per-addon READMEs](#statistics--simd-aggregation) and the H100 section below for the full teardown.
 
 ### Matrix Multiply — Progressive Optimization
 
@@ -96,6 +96,52 @@ node wyhash/hash.js
 |----------|-----|------|-----|------|-------------|
 | **wyHash** (BigInt) | 3.7x | **52.9x** | **65.9x** | **66.2x** | 128-bit folded multiply |
 | wyHash64 (Number) | 2.9x | 45.5x | 57.8x | 58.7x | Same kernel, Number return |
+
+## H100 Cloud Benchmark Results
+
+We ran the three GPU-enabled addons (stats, image, simd-search) on an **NVIDIA H100 80GB HBM3** via RunPod (~$1.99/hr) to see whether the M4 Metal story — GPU losing to CPU SIMD — would flip on Tier-1 discrete GPU hardware. **It did not.** On every benchmark, Mojo CPU SIMD running on the H100 host's Xeon (AVX-512) beat Mojo GPU running on the H100.
+
+The reason matters more than the numbers. These addons call the GPU as one-shot N-API functions against **host-resident** data. Every call does `alloc → H2D copy → kernel → D2H copy → free`. On a PCIe Gen4 x16 link (~12 GB/s effective), PCIe is the bottleneck for data transfer, and the H100's 3 TB/s HBM3 bandwidth is effectively wasted because the data never lives on-device long enough to amortize it. Meanwhile the Xeon host's AVX-512 reads the same data at ~30 GB/s directly from DRAM. For low-arithmetic-intensity kernels (reductions, elementwise, byte scanning) on a single-call API, CPU wins.
+
+This is the opposite of the narrative in most "port to GPU" benchmarks, and it's the most useful finding from the cloud run.
+
+### Stats on H100 (Float64 arrays, ratios vs V8 on the same host)
+
+| Size | H100 Mojo SIMD | H100 Mojo GPU |
+|------|----------------|---------------|
+| 100K | 5.0× | 4.7× |
+| 1M | 5.3× | 5.2× |
+| 10M | **8.3×** | 7.6× |
+
+Two factors drag stats on GPU: (1) the Float64→Float32 cast runs as a scalar host loop at [stats/addon.mojo:327](stats/addon.mojo#L327) — at 10M elements this alone is tens of ms per call — and (2) stats does two separate passes (`{sum,min,max}` then `sum_sq_diff(mean)`), each with its own allocation + copy cycle, doubling per-call overhead.
+
+### Image grayscale on H100 (4K RGBA)
+
+| Size | H100 Mojo SIMD | H100 Mojo GPU |
+|------|----------------|---------------|
+| 720p | 3.2× | 2.6× |
+| 1080p | 4.0× | 2.1× |
+| 4K | **4.3×** | 1.4× |
+
+The GPU gets *worse* relative to CPU as size grows. At 720p both paths bottleneck on per-call overhead so they're close; at 4K, CPU SIMD scales with DRAM bandwidth (~30 GB/s effective via AVX-512) while the GPU is PCIe-capped on 33 MB H2D + 33 MB D2H each call. Grayscale is the canonical memory-bandwidth-bound elementwise kernel where PCIe decides everything.
+
+### countByte on H100 (host Buffer scan)
+
+| Size | H100 Mojo SIMD | H100 Mojo GPU |
+|------|----------------|---------------|
+| 1MB | **60.1×** | 9.2× |
+| 17MB | **89.6×** | 12.2× |
+| 105MB | **35.1×** | 6.0× |
+
+AVX-512 byte scanning on Xeon Sapphire Rapids is brutal for this workload — 89.6× at 17MB is the most dramatic CPU-SIMD speedup anywhere in the project, and the H100 GPU trails by 7×. The 1KB row (GPU 0.0×, 25.7 μs per call) is pure CUDA API overhead: cached `DeviceContext` can't get below the kernel launch + device allocation cost, and CPU SIMD completes the same count in 357 ns.
+
+### What would actually make H100 win
+
+1. **Persistent device-resident buffers.** Upload a dataset once, scan it a thousand times. PCIe amortizes away and HBM bandwidth dominates.
+2. **Batched N-API API.** Process N inputs per call with async copy-compute overlap so the GPU is never idle waiting for PCIe.
+3. **Higher arithmetic intensity.** Matmul (O(n³) compute on O(n²) data), convolution, attention — anything where the compute cost dominates the transfer cost. Stats, grayscale, and countByte are all ≤1 op per byte, the worst possible ratio for any GPU on a PCIe link.
+
+All three are Phase 3 candidate work. See [docs/cloud-benchmark-runbook.md](docs/cloud-benchmark-runbook.md) to reproduce these numbers (~$1, ~30 minutes on RunPod), and the per-addon READMEs for deeper teardowns.
 
 ## When to Use Mojo
 

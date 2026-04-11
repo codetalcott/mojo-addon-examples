@@ -143,14 +143,34 @@ SEARCH_ACCEL="--target-accelerator sm_90a" pixi run bash simd-search/build.sh
 
 For other NVIDIA GPUs: A100 → `sm_80`, A10 → `sm_86`, L40 → `sm_89`, B100/B200 → `sm_100a`.
 
-## What the results should show
+## What the results actually showed
 
-These are **predictions, not promises** — actual numbers depend on HBM bandwidth, driver version, and kernel launch overhead.
+We ran this runbook against an **NVIDIA H100 80GB HBM3** via RunPod on 2026-04-10. The original predictions (kept below for the record) were **wrong in every case** — in every benchmark, Mojo CPU SIMD (Xeon Sapphire Rapids AVX-512) beat Mojo GPU on the same host.
 
-| Kernel | Current M4 Metal | Predicted H100 | Reasoning |
+| Kernel | Original Prediction | Actual H100 Result | Why the Prediction Missed |
 |---|---|---|---|
-| `statsGpu` at 10M | 4.2× JS | **20-50× JS**, ≥ Mojo SIMD | Float32 reduction is bandwidth-bound; 3TB/s HBM dominates CPU SIMD |
-| `grayscaleGpu` at 4K | 0.8× JS | **30-100× JS** | Elementwise on 33MB — H100 does this in ~10μs |
-| `countByteGpu` at 100MB | 2.3× JS | **50-150× JS**, ≥ CPU SIMD | Tree reduction + 100MB DMA is HBM-bound; expected to beat CPU |
+| `statsGpu` at 10M | 20-50× JS, ≥ CPU SIMD | 7.6× JS, **< CPU SIMD (8.3×)** | Two-pass algorithm + scalar Float64→Float32 cast loop on host + PCIe-bound H2D |
+| `grayscaleGpu` at 4K | 30-100× JS | 1.4× JS, **≪ CPU SIMD (4.3×)** | 33MB H2D + 33MB D2H each call; PCIe-capped |
+| `countByteGpu` at 100MB | 50-150× JS, ≥ CPU SIMD | 6.0× JS, **≪ CPU SIMD (35.1×)** | 105MB H2D at ~12 GB/s vs AVX-512 DRAM at ~30 GB/s |
 
-If any of these come back *close to* or *below* the CPU numbers, something's wrong with the kernel or the DeviceContext is being recreated per call — flag it and investigate.
+**The core error in the original predictions**: they reasoned about H100 bandwidth (3 TB/s HBM3) without accounting for how the data reaches the device. These addons call the GPU as one-shot N-API functions against host-resident data — every call does `alloc → H2D → kernel → D2H → free`. The data never lives on-device long enough to amortize the PCIe copy. On a PCIe Gen4 x16 link (~12 GB/s effective), PCIe is the bottleneck for any kernel that touches each byte only a few times.
+
+Meanwhile CPU SIMD sits directly on DRAM at ~30 GB/s effective via AVX-512, with no copy step. For low-arithmetic-intensity kernels (reductions, elementwise, byte scanning), **CPU wins on single-shot calls against host-resident data — even on a box that has an H100 in it.**
+
+**What would make H100 actually win these benchmarks**:
+
+1. **Persistent device buffers** across many calls (upload once, scan/reduce many times)
+2. **Batched N-API API** that processes N inputs per call with async copy-compute overlap
+3. **Higher arithmetic intensity**: matmul (O(n³) compute on O(n²) data), convolution, attention — anything where compute dominates transfer
+
+None of those are in scope for Phase 2. They are candidate Phase 3 work.
+
+**The runbook below still works** — you can reproduce these numbers on any H100 or A100 in ~15 minutes for ~$1, and you can use it to validate your own setups or test Phase 3 improvements.
+
+### Troubleshooting signals
+
+If your results come back dramatically different from the table above, something is off:
+
+- **GPU column much faster than CPU SIMD**: you may have accidentally benchmarked device-resident data, or Phase 3 improvements landed and should be documented.
+- **GPU column much slower than above** (e.g. stats 10M < 2× JS): `DeviceContext` is probably being recreated per call. Check the instance_data caching path in the addon's `register_module`.
+- **`Context leak detected` warnings in stderr**: N-API finalizer for the cached `DeviceContext` is misbehaving. Not fatal but investigate.
