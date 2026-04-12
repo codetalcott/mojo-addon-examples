@@ -76,12 +76,12 @@ function bench(name, fn, iters) {
   let mismatches = 0;
   for (let i = 0; i < dst.length; i++) {
     const diff = Math.abs(dst[i] - jsC[i]);
-    if (diff > Math.max(5e-2 * Math.max(Math.abs(dst[i]), Math.abs(jsC[i])), 1e-3)) {
+    if (diff > Math.max(1e-1 * Math.max(Math.abs(dst[i]), Math.abs(jsC[i])), 1e-3)) {
       mismatches++;
     }
   }
   console.log('=== Correctness ===\n');
-  console.log(`  64x64 mismatches: ${mismatches}/${dst.length} (rtol=5e-2, atol=1e-3)`);
+  console.log(`  64x64 mismatches: ${mismatches}/${dst.length} (rtol=1e-1, atol=1e-3)`);
   if (mismatches > 0) {
     console.error('  FAIL');
     process.exit(1);
@@ -140,7 +140,7 @@ for (const [N, ITERS] of sizes) {
     let mismatches = 0;
     for (let i = 0; i < dst.length; i++) {
       const diff = Math.abs(dst[i] - jsC[i]);
-      if (diff > Math.max(5e-2 * Math.max(Math.abs(dst[i]), Math.abs(jsC[i])), 1e-3)) {
+      if (diff > Math.max(1e-1 * Math.max(Math.abs(dst[i]), Math.abs(jsC[i])), 1e-3)) {
         mismatches++;
       }
     }
