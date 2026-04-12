@@ -70,15 +70,18 @@ function bench(name, fn, iters) {
   cached.releaseMatrixGpu(hA);
   cached.releaseMatrixGpu(hB);
 
+  // Tolerance accommodates TF32 tensor cores on H100 (~1e-3 rel err per
+  // multiply, compounds over K-sums). Metal FP32 passes with much tighter
+  // tolerance but both are within rtol=1e-2.
   let mismatches = 0;
   for (let i = 0; i < dst.length; i++) {
     const diff = Math.abs(dst[i] - jsC[i]);
-    if (diff > Math.max(1e-3 * Math.max(Math.abs(dst[i]), Math.abs(jsC[i])), 1e-5)) {
+    if (diff > Math.max(1e-2 * Math.max(Math.abs(dst[i]), Math.abs(jsC[i])), 1e-4)) {
       mismatches++;
     }
   }
   console.log('=== Correctness ===\n');
-  console.log(`  64x64 mismatches: ${mismatches}/${dst.length} (rtol=1e-3, atol=1e-5)`);
+  console.log(`  64x64 mismatches: ${mismatches}/${dst.length} (rtol=1e-2, atol=1e-4)`);
   if (mismatches > 0) {
     console.error('  FAIL');
     process.exit(1);
@@ -137,14 +140,14 @@ for (const [N, ITERS] of sizes) {
     let mismatches = 0;
     for (let i = 0; i < dst.length; i++) {
       const diff = Math.abs(dst[i] - jsC[i]);
-      if (diff > Math.max(1e-3 * Math.max(Math.abs(dst[i]), Math.abs(jsC[i])), 1e-4)) {
+      if (diff > Math.max(1e-2 * Math.max(Math.abs(dst[i]), Math.abs(jsC[i])), 1e-4)) {
         mismatches++;
       }
     }
     if (mismatches > dst.length * 0.01) {
       cached.releaseMatrixGpu(hA);
       cached.releaseMatrixGpu(hB);
-      throw new Error(`too many mismatches: ${mismatches}/${dst.length}`);
+      throw new Error(`too many mismatches: ${mismatches}/${dst.length} (TF32/FP32 precision floor)`);
     }
 
     const cachedR = bench(
