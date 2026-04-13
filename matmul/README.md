@@ -140,6 +140,10 @@ At larger batches (B=64, 256), GPU exact pulls further ahead: at k=10 recall 0.6
 
 The ORT baseline uses a dynamic-shape MatMul graph at [matmul/fixtures/matmul_dyn.onnx](fixtures/matmul_dyn.onnx) (118 bytes, regenerable via the one-liner in the file header).
 
+### M4 Metal memory ceiling
+
+`node matmul/matmul_rag.js --full` attempts `[1, 768] × [768, 1_000_000]` (3 GB corpus). On M4 Metal this crashes inside `loadMatrixGpu` without unwinding to JS — Metal can't cleanly allocate a 3 GB device buffer from the unified memory pool while `onnxruntime-node` already holds a copy. **100k is the practical corpus ceiling for d=768 on M4 Metal.** H100 with 80 GB HBM3 wouldn't have the problem; until there's a hardware target with headroom, treat `--full` as H100-only.
+
 ### End-to-end RAG demo
 
 See [`examples/rag-demo/search.js`](../examples/rag-demo/search.js) — ~80 lines of Node wrapping `searchHandle` into a `GpuIndex.search(query, k)` method. Generates a synthetic 10k × 768 corpus, runs a self-similarity query, prints the top 10 at ~7 ms/query on M4 Metal. Swap `makeSyntheticCorpus` for a loader over your real precomputed embeddings.

@@ -131,9 +131,12 @@ def _matmul_cached(
     var N = b[].cols
     var c_elems = M * N
 
-    # Per-call C buffer (device + pinned host for D2H).
+    # Per-call C buffer (device + pinned host for D2H). linalg.matmul writes
+    # every element of C (no accumulation from initial contents), so the
+    # enqueue_fill(0.0) that used to live here was wasted bandwidth on
+    # tall-skinny RAG shapes — at [256, 768] × [768, 100k] the 102 MB zero
+    # fill was ~15% of per-call time on M4 Metal.
     var dev_c = ctx.enqueue_create_buffer[dtype](c_elems)
-    dev_c.enqueue_fill(0.0)
     var host_c = ctx.enqueue_create_host_buffer[dtype](c_elems)
 
     # Wrap persistent A, B and per-call C as TileTensors.
