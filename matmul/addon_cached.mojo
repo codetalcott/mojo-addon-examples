@@ -38,6 +38,16 @@ from napi.framework.runtime import init_async_runtime
 
 comptime dtype = DType.float32
 
+# NOTE: a hand-rolled tall-skinny matmul kernel was attempted here (shared-
+# memory A cache + coalesced B reads across threadgroup-consecutive j) on
+# the theory that linalg.matmul[target="gpu"]'s 67 GFLOP/s ceiling on M4
+# Metal was due to kernel selection targeting square-ish shapes. The custom
+# kernel landed **1.7× slower** at batch-64/256 and about 10% slower at
+# single-query, confirming that MAX's kernel selector does dispatch well on
+# Metal — the 67 GFLOP/s is a hardware ceiling (memory bandwidth + no
+# tensor cores on Apple Silicon for FP32), not a software one. H100 with
+# HBM3 + TF32 tensor cores is where the throughput story actually flips.
+
 
 # --- GpuState ----------------------------------------------------------------
 
@@ -295,7 +305,6 @@ def _search_cached(
     var c_elems = M * N
 
     var dev_c = ctx.enqueue_create_buffer[dtype](c_elems)
-    dev_c.enqueue_fill(0.0)
     var host_c = ctx.enqueue_create_host_buffer[dtype](c_elems)
 
     var tt_a = TileTensor[dtype](a[].dev_data, row_major(Coord(Idx(M), Idx(K))))
