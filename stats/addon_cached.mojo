@@ -36,15 +36,14 @@ from std.gpu import thread_idx, block_idx, barrier
 from std.gpu.memory import AddressSpace
 from std.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
 
-from napi.types import NapiEnv, NapiValue, NAPI_TYPE_EXTERNAL
+from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error
 from napi.bindings import NapiBindings, Bindings, init_bindings
-from napi.raw import raw_set_instance_data, raw_get_instance_data
+from napi.framework.instance_data import set_instance_data, get_instance_data
 from napi.framework.js_number import JsNumber
 from napi.framework.js_object import JsObject
 from napi.framework.js_typedarray import JsTypedArray
 from napi.framework.js_external import JsExternal
-from napi.framework.js_value import js_typeof
 from napi.framework.args import CbArgs
 from napi.framework.register import fn_ptr, ModuleBuilder
 from napi.framework.runtime import init_async_runtime
@@ -66,26 +65,13 @@ struct GpuState(Movable):
         self.ctx = ctx^
 
 
-def _gpu_state_finalize(
-    env: NapiEnv,
-    data: OpaquePointer[MutAnyOrigin],
-    hint: OpaquePointer[MutAnyOrigin],
-):
-    var ptr = data.bitcast[GpuState]()
-    ptr.destroy_pointee()
-    ptr.free()
-
-
 def _get_gpu_state(
     b: Bindings, env: NapiEnv
 ) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
-    var data = OpaquePointer[MutAnyOrigin]()
-    _ = raw_get_instance_data(
-        b, env, UnsafePointer(to=data).bitcast[NoneType]()
-    )
-    if Int(data) == 0:
+    try:
+        return get_instance_data[GpuState](b, env)
+    except:
         raise Error("loadStatsGpu requires a GPU (no accelerator found)")
-    return data.bitcast[GpuState]()
 
 
 # --- Quickselect + partition (copied from stats/addon.mojo) ------------------
@@ -182,16 +168,6 @@ struct CachedStats(Movable):
         # DeviceBuffer/HostBuffer destructors run automatically via field
         # teardown; the only field we own explicitly is the heap Float64 copy.
         self.data_f64.free()
-
-
-def _cached_stats_finalize(
-    env: NapiEnv,
-    data: OpaquePointer[MutAnyOrigin],
-    hint: OpaquePointer[MutAnyOrigin],
-):
-    var ptr = data.bitcast[CachedStats]()
-    ptr.destroy_pointee()
-    ptr.free()
 
 
 # --- GPU kernels (verbatim clone of stats/addon.mojo) ------------------------
@@ -380,18 +356,7 @@ def load_stats_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var state = _get_gpu_state(b, env)
 
         var cs_val = _load_stats_gpu(state[].ctx, ptr, size)
-
-        var cs_ptr = alloc[CachedStats](1)
-        cs_ptr.init_pointee_move(cs_val^)
-
-        var fin_ref = _cached_stats_finalize
-        var fin_ptr = UnsafePointer(to=fin_ref).bitcast[
-            OpaquePointer[MutAnyOrigin]
-        ]()[]
-
-        return JsExternal.create(
-            b, env, cs_ptr.bitcast[NoneType](), fin_ptr
-        ).value
+        return JsExternal.create_typed(b, env, cs_val^).value
     except:
         throw_js_error(env, "loadStatsGpu failed (no GPU or upload error)")
         return NapiValue()
@@ -483,11 +448,9 @@ def stats_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var r = CbArgs.get_bindings_and_one(env, info)
         var b = r.b
-        var t = js_typeof(b, env, r.arg0)
-        if t != NAPI_TYPE_EXTERNAL:
-            raise Error("statsHandle: expected External handle")
-        var data = JsExternal.get_data(b, env, r.arg0)
-        var cs = data.bitcast[CachedStats]()
+        var cs = JsExternal.get_typed[CachedStats](
+            b, env, r.arg0, "statsHandle"
+        )
         if cs[].released:
             raise Error("statsHandle: handle has been released")
 
@@ -514,11 +477,9 @@ def release_stats_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var r = CbArgs.get_bindings_and_one(env, info)
         var b = r.b
-        var t = js_typeof(b, env, r.arg0)
-        if t != NAPI_TYPE_EXTERNAL:
-            raise Error("releaseStatsGpu: expected External handle")
-        var data = JsExternal.get_data(b, env, r.arg0)
-        var cs = data.bitcast[CachedStats]()
+        var cs = JsExternal.get_typed[CachedStats](
+            b, env, r.arg0, "releaseStatsGpu"
+        )
         cs[].released = True
         return JsNumber.create(b, env, 0.0).value
     except:
@@ -547,19 +508,7 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
 
     try:
         var ctx = DeviceContext()
-        var state_ptr = alloc[GpuState](1)
-        state_ptr.init_pointee_move(GpuState(ctx^))
-        var fin_ref = _gpu_state_finalize
-        var fin_ptr = UnsafePointer(to=fin_ref).bitcast[
-            OpaquePointer[MutAnyOrigin]
-        ]()[]
-        _ = raw_set_instance_data(
-            bindings_ptr,
-            env,
-            state_ptr.bitcast[NoneType](),
-            fin_ptr,
-            OpaquePointer[MutAnyOrigin](),
-        )
+        set_instance_data(bindings_ptr, env, GpuState(ctx^))
     except:
         pass
 

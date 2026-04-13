@@ -19,15 +19,14 @@ from std.memory import alloc, memcpy
 from std.gpu import global_idx
 from std.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
 
-from napi.types import NapiEnv, NapiValue, NAPI_TYPE_EXTERNAL
+from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error
 from napi.bindings import NapiBindings, Bindings, init_bindings
-from napi.raw import raw_set_instance_data, raw_get_instance_data
+from napi.framework.instance_data import set_instance_data, get_instance_data
 from napi.framework.js_number import JsNumber
 from napi.framework.js_int32 import JsInt32
 from napi.framework.js_typedarray import JsTypedArray
 from napi.framework.js_external import JsExternal
-from napi.framework.js_value import js_typeof
 from napi.framework.args import CbArgs
 from napi.framework.register import fn_ptr, ModuleBuilder
 from napi.framework.runtime import init_async_runtime
@@ -47,26 +46,13 @@ struct GpuState(Movable):
         self.ctx = ctx^
 
 
-def _gpu_state_finalize(
-    env: NapiEnv,
-    data: OpaquePointer[MutAnyOrigin],
-    hint: OpaquePointer[MutAnyOrigin],
-):
-    var ptr = data.bitcast[GpuState]()
-    ptr.destroy_pointee()
-    ptr.free()
-
-
 def _get_gpu_state(
     b: Bindings, env: NapiEnv
 ) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
-    var data = OpaquePointer[MutAnyOrigin]()
-    _ = raw_get_instance_data(
-        b, env, UnsafePointer(to=data).bitcast[NoneType]()
-    )
-    if Int(data) == 0:
+    try:
+        return get_instance_data[GpuState](b, env)
+    except:
         raise Error("loadImageGpu requires a GPU (no accelerator found)")
-    return data.bitcast[GpuState]()
 
 
 # --- CachedImage: device-resident RGBA buffers + pinned D2H destination -----
@@ -101,16 +87,6 @@ struct CachedImage(Movable):
         self.num_pixels = num_pixels
         self.num_bytes = num_pixels * 4
         self.released = False
-
-
-def _cached_image_finalize(
-    env: NapiEnv,
-    data: OpaquePointer[MutAnyOrigin],
-    hint: OpaquePointer[MutAnyOrigin],
-):
-    var ptr = data.bitcast[CachedImage]()
-    ptr.destroy_pointee()
-    ptr.free()
 
 
 # --- GPU kernel (identical to the non-cached addon) -------------------------
@@ -177,18 +153,7 @@ def load_image_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var state = _get_gpu_state(b, env)
 
         var ci_val = _load_image_gpu(state[].ctx, src_ptr, num_pixels)
-
-        var ci_ptr = alloc[CachedImage](1)
-        ci_ptr.init_pointee_move(ci_val^)
-
-        var fin_ref = _cached_image_finalize
-        var fin_ptr = UnsafePointer(to=fin_ref).bitcast[
-            OpaquePointer[MutAnyOrigin]
-        ]()[]
-
-        return JsExternal.create(
-            b, env, ci_ptr.bitcast[NoneType](), fin_ptr
-        ).value
+        return JsExternal.create_typed(b, env, ci_val^).value
     except:
         throw_js_error(env, "loadImageGpu failed (no GPU or upload error)")
         return NapiValue()
@@ -223,11 +188,9 @@ def grayscale_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var r = CbArgs.get_bindings_and_two(env, info)
         var b = r.b
-        var t = js_typeof(b, env, r.arg0)
-        if t != NAPI_TYPE_EXTERNAL:
-            raise Error("grayscaleHandle: expected External handle")
-        var data = JsExternal.get_data(b, env, r.arg0)
-        var ci = data.bitcast[CachedImage]()
+        var ci = JsExternal.get_typed[CachedImage](
+            b, env, r.arg0, "grayscaleHandle"
+        )
         if ci[].released:
             raise Error("grayscaleHandle: handle has been released")
 
@@ -251,11 +214,9 @@ def release_image_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var r = CbArgs.get_bindings_and_one(env, info)
         var b = r.b
-        var t = js_typeof(b, env, r.arg0)
-        if t != NAPI_TYPE_EXTERNAL:
-            raise Error("releaseImageGpu: expected External handle")
-        var data = JsExternal.get_data(b, env, r.arg0)
-        var ci = data.bitcast[CachedImage]()
+        var ci = JsExternal.get_typed[CachedImage](
+            b, env, r.arg0, "releaseImageGpu"
+        )
         ci[].released = True
         return JsNumber.create(b, env, 0.0).value
     except:
@@ -285,19 +246,7 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     # Cache a DeviceContext if a GPU is available.
     try:
         var ctx = DeviceContext()
-        var state_ptr = alloc[GpuState](1)
-        state_ptr.init_pointee_move(GpuState(ctx^))
-        var fin_ref = _gpu_state_finalize
-        var fin_ptr = UnsafePointer(to=fin_ref).bitcast[
-            OpaquePointer[MutAnyOrigin]
-        ]()[]
-        _ = raw_set_instance_data(
-            bindings_ptr,
-            env,
-            state_ptr.bitcast[NoneType](),
-            fin_ptr,
-            OpaquePointer[MutAnyOrigin](),
-        )
+        set_instance_data(bindings_ptr, env, GpuState(ctx^))
     except:
         pass
 
