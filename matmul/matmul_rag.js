@@ -18,8 +18,11 @@
 // Build:  pixi run bash matmul/build_cached.sh
 // Run:    node matmul/matmul_rag.js
 
+const path = require('path');
+
 const args = process.argv.slice(2);
 const FULL = args.includes('--full');
+const SKIP_ORT = args.includes('--no-ort');
 const concurrencyArg = args.find((a) => a.startsWith('--concurrency='));
 const CONCURRENCY = concurrencyArg ? parseInt(concurrencyArg.split('=')[1], 10) : 0;
 
@@ -29,6 +32,18 @@ try {
 } catch (e) {
   console.error('matmul_cached.node not found — run: pixi run bash matmul/build_cached.sh');
   process.exit(1);
+}
+
+// onnxruntime-node: optional CPU matmul baseline (apples-to-apples backend
+// comparison). Skipped if --no-ort or if the package/model file is missing.
+let ort = null;
+let ortSession = null;
+if (!SKIP_ORT) {
+  try {
+    ort = require('onnxruntime-node');
+  } catch (e) {
+    console.log('[info] onnxruntime-node not installed — run: npm install onnxruntime-node');
+  }
 }
 
 // --- JS baseline — used only where flops budget allows ----------------------
@@ -57,6 +72,14 @@ function bench(fn, iters) {
   for (let i = 0; i < Math.min(iters, 2); i++) fn();
   const start = performance.now();
   for (let i = 0; i < iters; i++) fn();
+  const ms = performance.now() - start;
+  return { ms, msPerOp: ms / iters };
+}
+
+async function benchAsync(fn, iters) {
+  for (let i = 0; i < Math.min(iters, 2); i++) await fn();
+  const start = performance.now();
+  for (let i = 0; i < iters; i++) await fn();
   const ms = performance.now() - start;
   return { ms, msPerOp: ms / iters };
 }
@@ -119,7 +142,7 @@ function correctnessCheck() {
 
 // --- Main benchmark loop -----------------------------------------------------
 
-function benchShape({ B, d, N, iters, label }) {
+async function benchShape({ B, d, N, iters, label }) {
   const flops = 2 * B * d * N;
   const bytesB = d * N * 4;
   const bytesDst = B * N * 4;
@@ -141,6 +164,25 @@ function benchShape({ B, d, N, iters, label }) {
     console.log(`  JS loop:      skipped (est ${jsEstSec.toFixed(1)}s > ${JS_BUDGET_SEC}s budget)`);
   }
 
+  // onnxruntime-node CPU matmul (same computation, different backend).
+  // Lazy: first shape initializes the session.
+  let ortResult = null;
+  if (ortSession) {
+    const feeds = {
+      A: new ort.Tensor('float32', a, [B, d]),
+      B: new ort.Tensor('float32', b, [d, N]),
+    };
+    try {
+      // Cap iterations for expensive shapes — ORT CPU on 256×768×100k is
+      // seconds per call, not milliseconds.
+      const ortIters = Math.min(iters, Math.max(1, Math.floor(500 / (flops / 1e9))));
+      ortResult = await benchAsync(async () => await ortSession.run(feeds), ortIters);
+      console.log(`  ORT CPU:      ${ortResult.msPerOp.toFixed(2)}ms/op  ${gflops(flops, ortResult.msPerOp).toFixed(2)} GFLOP/s  (onnxruntime-node MatMul)`);
+    } catch (e) {
+      console.log(`  ORT CPU:      failed (${e.message})`);
+    }
+  }
+
   try {
     const loadStart = performance.now();
     const hA = cached.loadMatrixGpu(a, B, d);
@@ -151,11 +193,10 @@ function benchShape({ B, d, N, iters, label }) {
     const cachedR = bench(() => cached.matmulHandle(hA, hB, dst), iters);
     const gpuGf = gflops(flops, cachedR.msPerOp);
 
-    let speedupNote = '';
-    if (jsResult) {
-      const vsJs = jsResult.msPerOp / cachedR.msPerOp;
-      speedupNote = `  ${vsJs.toFixed(0)}× vs JS`;
-    }
+    const parts = [];
+    if (jsResult) parts.push(`${(jsResult.msPerOp / cachedR.msPerOp).toFixed(0)}× vs JS`);
+    if (ortResult) parts.push(`${(ortResult.msPerOp / cachedR.msPerOp).toFixed(1)}× vs ORT`);
+    const speedupNote = parts.length ? `  ${parts.join(', ')}` : '';
     console.log(`  GPU cached:   ${cachedR.msPerOp.toFixed(2)}ms/op  ${gpuGf.toFixed(2)} GFLOP/s${speedupNote}`);
     console.log(`                (loadMatrixGpu: ${loadMs.toFixed(1)}ms one-time)`);
 
@@ -191,10 +232,24 @@ function benchShape({ B, d, N, iters, label }) {
 
 // --- Entry -------------------------------------------------------------------
 
-console.log('--- matmul RAG-shape benchmark ---\n');
-console.log(`  mode: ${FULL ? 'full (includes 1M-corpus shapes)' : 'base (100K-corpus only; use --full for 1M)'}`);
-if (CONCURRENCY > 0) console.log(`  concurrency: ${CONCURRENCY} sync calls per batch`);
-console.log('');
+async function main() {
+  console.log('--- matmul RAG-shape benchmark ---\n');
+  console.log(`  mode: ${FULL ? 'full (includes 1M-corpus shapes)' : 'base (100K-corpus only; use --full for 1M)'}`);
+  if (CONCURRENCY > 0) console.log(`  concurrency: ${CONCURRENCY} sync calls per batch`);
 
-correctnessCheck();
-for (const shape of SHAPES) benchShape(shape);
+  if (ort) {
+    try {
+      const modelPath = path.resolve(__dirname, 'fixtures/matmul_dyn.onnx');
+      ortSession = await ort.InferenceSession.create(modelPath);
+      console.log(`  ORT baseline: onnxruntime-node ${ort.env?.versions?.common ?? ''} (CPU)`);
+    } catch (e) {
+      console.log(`  ORT baseline: unavailable (${e.message})`);
+    }
+  }
+  console.log('');
+
+  correctnessCheck();
+  for (const shape of SHAPES) await benchShape(shape);
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });

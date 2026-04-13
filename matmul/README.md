@@ -104,16 +104,24 @@ Implementation: runs the existing `linalg.matmul` into a device scores buffer, D
 
 ### M4 Metal results (local dev benchmark)
 
-Run: `node matmul/matmul_rag.js` (append `--concurrency=100` for latency percentiles, `--full` for 1M-corpus shapes).
+Run: `node matmul/matmul_rag.js` (append `--concurrency=100` for latency percentiles, `--full` for 1M-corpus shapes, `--no-ort` to skip the ORT baseline).
 
-| Shape                              | GPU cached ms/op | GFLOP/s | p50 / p99 (burst=100) |
-| ---------------------------------- | ---------------: | ------: | --------------------: |
-| `[1, 768] × [768, 100k]` (RAG)     |           6.0 ms |   25.6  |     5.8 / 12.2 ms     |
-| `[1, 1536] × [1536, 100k]`         |           8.7 ms |   35.3  |      8.6 / 9.5 ms     |
-| `[64, 768] × [768, 100k]`          |         145.6 ms |   67.5  |    146.1 / 152.6 ms   |
-| `[256, 768] × [768, 100k]` offline |         595.6 ms |   66.0  |                 —     |
+Three-path comparison: single-threaded JS · `onnxruntime-node` CPU matmul (MLAS → Apple Accelerate) · our cached GPU path.
 
-Honest numbers: 17–21× vs single-threaded JS on single-query RAG — far from the 28,343× square-case headline, but 5–9 ms single-query latency is already well below what a hosted vector-DB round-trip would cost, and `p99 / p50 ≈ 2.1×` under a 100-call burst confirms no event-loop starvation under sustained sync load.
+| Shape                              |   JS    | ORT CPU  | GPU cached | vs ORT |
+| ---------------------------------- | ------: | -------: | ---------: | -----: |
+| `[1, 768] × [768, 100k]` (RAG)     | 97.8 ms | 19.1 ms  | **5.6 ms** | **3.4× win** |
+| `[1, 1536] × [1536, 100k]`         |  (skip) | 38.4 ms  | **7.5 ms** | **5.1× win** |
+| `[64, 768] × [768, 100k]`          |  (skip) | **31.3 ms** | 145.3 ms | 4.6× ORT win |
+| `[256, 768] × [768, 100k]` offline |  (skip) | **56.7 ms** | 588.3 ms | 10× ORT win  |
+
+Honest reading:
+
+- **Single-query RAG (B=1)**: cached GPU is 3–5× faster than the best Node CPU option. 5–9 ms latency is below what a hosted vector-DB round-trip costs. This is the latency play.
+- **Batched matmul on M4 Metal**: ORT CPU wins decisively. MLAS/Accelerate sustains ~700 GFLOP/s on batched `MatMul`; our `linalg.matmul[target="gpu"]` path stays flat at ~67 GFLOP/s regardless of batch size on M4, and the `[B, N]` D2H scales with B. The throughput play requires a GPU with tensor cores and HBM — H100 numbers pending.
+- **Event-loop stability**: `p99 / p50 = 2.1×` at single-query under a 100-call burst (`--concurrency=100`) — no starvation under sustained sync dispatch.
+
+The ORT baseline uses a dynamic-shape MatMul graph at [matmul/fixtures/matmul_dyn.onnx](fixtures/matmul_dyn.onnx) (118 bytes, regenerable via the one-liner in the file header).
 
 ### End-to-end RAG demo
 
