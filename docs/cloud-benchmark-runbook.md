@@ -91,7 +91,11 @@ node simd-search/search.js 2>&1           >> ~/bench-output.txt
 
 echo ""                                   >> ~/bench-output.txt
 echo "=== MATMUL RAG-SHAPE BENCHMARK ===" >> ~/bench-output.txt
-node matmul/matmul_rag.js --concurrency=100 2>&1 >> ~/bench-output.txt
+# --full enables 1M-corpus shapes that OOM on M4 Metal but fit in H100 HBM3.
+# --concurrency=100 adds p50/p95/p99 under sustained burst per shape.
+# hnswlib build at N=100k, d=768 is CPU-bound (1-5 min on H100 host's Xeon);
+# the bench caches the build across shapes so the ~5 min cost is paid once.
+node matmul/matmul_rag.js --full --concurrency=100 2>&1 >> ~/bench-output.txt
 
 echo ""                                   >> ~/bench-output.txt
 echo "=== nvidia-smi FINAL ==="           >> ~/bench-output.txt
