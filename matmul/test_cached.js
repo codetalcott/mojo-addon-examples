@@ -176,4 +176,146 @@ for (const [M, K, N] of sizes) {
   totalCases += 100;
 }
 
+// --- searchHandle: fused matmul + top-k ------------------------------------
+
+function jsTopK(scores, B, N, k) {
+  const outIdx = new Uint32Array(B * k);
+  const outScores = new Float32Array(B * k);
+  for (let r = 0; r < B; r++) {
+    const pairs = new Array(N);
+    for (let j = 0; j < N; j++) pairs[j] = [scores[r * N + j], j];
+    // Sort descending by score; break ties by ascending index for determinism.
+    pairs.sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+    for (let i = 0; i < k; i++) {
+      outScores[r * k + i] = pairs[i][0];
+      outIdx[r * k + i] = pairs[i][1];
+    }
+  }
+  return { outIdx, outScores };
+}
+
+// Assert: top-k results are descending, and the set of returned indices has
+// high overlap with the JS reference. TF32 non-determinism near ties means
+// exact ordering can differ, but the top-k set should be stable.
+function assertTopKMatches(dstIdx, dstScores, refIdx, refScores, B, k, label) {
+  for (let r = 0; r < B; r++) {
+    // Monotonic descending within each row.
+    for (let i = 1; i < k; i++) {
+      assert.ok(
+        dstScores[r * k + i] <= dstScores[r * k + i - 1] + 1e-4,
+        `${label} row=${r} not descending at i=${i}: ${dstScores[r * k + i]} > ${dstScores[r * k + i - 1]}`,
+      );
+    }
+    // Set overlap: >= 90% of JS top-k should be present in GPU top-k.
+    const refSet = new Set();
+    for (let i = 0; i < k; i++) refSet.add(refIdx[r * k + i]);
+    let overlap = 0;
+    for (let i = 0; i < k; i++) {
+      if (refSet.has(dstIdx[r * k + i])) overlap++;
+    }
+    const frac = overlap / k;
+    assert.ok(
+      frac >= 0.9,
+      `${label} row=${r} index overlap ${overlap}/${k} (${(frac * 100).toFixed(0)}%)`,
+    );
+  }
+}
+
+// Case A: small rectangular, k=10
+{
+  const B = 4, d = 16, N = 100, k = 10;
+  const a = makeMatrix(B, d, 0x70F1);
+  const bMat = makeMatrix(d, N, 0x70F2);
+  const fullScores = jsMatmul(a, bMat, B, d, N);
+  const ref = jsTopK(fullScores, B, N, k);
+
+  const hA = cached.loadMatrixGpu(a, B, d);
+  const hB = cached.loadMatrixGpu(bMat, d, N);
+  const outIdx = new Uint32Array(B * k);
+  const outScores = new Float32Array(B * k);
+  cached.searchHandle(hA, hB, outIdx, outScores);
+  assertTopKMatches(outIdx, outScores, ref.outIdx, ref.outScores, B, k, `searchHandle ${B}x${d}x${N} k=${k}`);
+  cached.releaseMatrixGpu(hA);
+  cached.releaseMatrixGpu(hB);
+  totalCases++;
+}
+
+// Case B: tall-skinny RAG shape, k=50
+{
+  const B = 1, d = 128, N = 5000, k = 50;
+  const a = makeMatrix(B, d, 0x1234);
+  const bMat = makeMatrix(d, N, 0x5678);
+  const fullScores = jsMatmul(a, bMat, B, d, N);
+  const ref = jsTopK(fullScores, B, N, k);
+
+  const hA = cached.loadMatrixGpu(a, B, d);
+  const hB = cached.loadMatrixGpu(bMat, d, N);
+  const outIdx = new Uint32Array(B * k);
+  const outScores = new Float32Array(B * k);
+  cached.searchHandle(hA, hB, outIdx, outScores);
+  assertTopKMatches(outIdx, outScores, ref.outIdx, ref.outScores, B, k, `searchHandle tall-skinny ${B}x${d}x${N} k=${k}`);
+  cached.releaseMatrixGpu(hA);
+  cached.releaseMatrixGpu(hB);
+  totalCases++;
+}
+
+// Case C: batched queries, k=20
+{
+  const B = 8, d = 64, N = 1000, k = 20;
+  const a = makeMatrix(B, d, 0xABCD);
+  const bMat = makeMatrix(d, N, 0xDCBA);
+  const fullScores = jsMatmul(a, bMat, B, d, N);
+  const ref = jsTopK(fullScores, B, N, k);
+
+  const hA = cached.loadMatrixGpu(a, B, d);
+  const hB = cached.loadMatrixGpu(bMat, d, N);
+  const outIdx = new Uint32Array(B * k);
+  const outScores = new Float32Array(B * k);
+  cached.searchHandle(hA, hB, outIdx, outScores);
+  assertTopKMatches(outIdx, outScores, ref.outIdx, ref.outScores, B, k, `searchHandle batched ${B}x${d}x${N} k=${k}`);
+  cached.releaseMatrixGpu(hA);
+  cached.releaseMatrixGpu(hB);
+  totalCases++;
+}
+
+// Case D: length mismatch (indices vs scores) should throw
+{
+  const a = makeMatrix(2, 16, 0x1);
+  const bMat = makeMatrix(16, 100, 0x2);
+  const hA = cached.loadMatrixGpu(a, 2, 16);
+  const hB = cached.loadMatrixGpu(bMat, 16, 100);
+  const outIdx = new Uint32Array(20);
+  const outScores = new Float32Array(10); // different length
+  let threw = false;
+  try {
+    cached.searchHandle(hA, hB, outIdx, outScores);
+  } catch (e) {
+    threw = true;
+  }
+  assert.ok(threw, 'searchHandle length mismatch should throw');
+  cached.releaseMatrixGpu(hA);
+  cached.releaseMatrixGpu(hB);
+  totalCases++;
+}
+
+// Case E: after release, searchHandle should throw
+{
+  const a = makeMatrix(2, 16, 0xA);
+  const bMat = makeMatrix(16, 100, 0xB);
+  const hA = cached.loadMatrixGpu(a, 2, 16);
+  const hB = cached.loadMatrixGpu(bMat, 16, 100);
+  cached.releaseMatrixGpu(hA);
+  const outIdx = new Uint32Array(2 * 10);
+  const outScores = new Float32Array(2 * 10);
+  let threw = false;
+  try {
+    cached.searchHandle(hA, hB, outIdx, outScores);
+  } catch (e) {
+    threw = true;
+  }
+  assert.ok(threw, 'searchHandle on released handle should throw');
+  cached.releaseMatrixGpu(hB);
+  totalCases++;
+}
+
 console.log(`matmul-cached: OK (${totalCases} correctness cases)`);

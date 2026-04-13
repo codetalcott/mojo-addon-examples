@@ -69,6 +69,9 @@ pixi run bash simd-search/build.sh
 pixi run bash matmul/build.sh
 pixi run bash wyhash/build.sh
 
+# Phase 3d: cached matmul + RAG-shape benchmark
+pixi run bash matmul/build_cached.sh
+
 # Regression tests
 echo "=== REGRESSION TESTS ==="            > ~/bench-output.txt
 npm test                                  >> ~/bench-output.txt 2>&1
@@ -85,6 +88,10 @@ node image/image.js 2>&1                  >> ~/bench-output.txt
 echo ""                                   >> ~/bench-output.txt
 echo "=== SIMD-SEARCH BENCHMARK ==="      >> ~/bench-output.txt
 node simd-search/search.js 2>&1           >> ~/bench-output.txt
+
+echo ""                                   >> ~/bench-output.txt
+echo "=== MATMUL RAG-SHAPE BENCHMARK ===" >> ~/bench-output.txt
+node matmul/matmul_rag.js --concurrency=100 2>&1 >> ~/bench-output.txt
 
 echo ""                                   >> ~/bench-output.txt
 echo "=== nvidia-smi FINAL ==="           >> ~/bench-output.txt
@@ -300,3 +307,20 @@ Four data points across four kernel shapes:
 The scaling curve confirms: **for cached GPU APIs, arithmetic intensity sets the ceiling on headline speedup, and persistent buffers remove the floor (PCIe bottleneck)**. Both mechanisms have to work for a kernel to land above 100× JS. countByte and matmul hit both; grayscale and stats hit only the floor removal. Plan future GPU addons accordingly — if the kernel is ≤10 flops per byte of I/O, expect modest single-digit-to-low-double-digit JS speedups even with the cached template. If it's 100+ flops per byte and H100 has tensor cores for it, four-figure speedups are realistic.
 
 Phase 3 is complete with this result. The cached-template helpers (`JsExternal.create_typed[T]`, `set_instance_data[T]`) landed in napi-mojo 0.3.0 and all four cached addons now consume them, eliminating per-addon finalizer plumbing. Remaining Phase 4+ work per the strategy doc's "not in scope" list: AMD MI300X validation, batched N-API, and FP16-strict matmul with explicit precision opt-outs for applications that need them.
+
+## Phase 3d — RAG-shape matmul + fused top-k (2026-04-13)
+
+The 28,343× headline above is the square 2048² case. For the realistic Node.js market for this kernel — local embedding retrieval / RAG, where the shape is tall-skinny `[B, d] × [d, N]` — the number is much lower. Phase 3d adds the `searchHandle` primitive (fused matmul + host-side min-heap top-k) and a RAG-shape benchmark so the honest numbers are documented.
+
+**M4 Metal (local dev, `node matmul/matmul_rag.js --concurrency=100`):**
+
+| Shape                              | ms/op | GFLOP/s | vs JS | p99 / p50 (burst=100) |
+| ---------------------------------- | ----: | ------: | ----: | --------------------: |
+| `[1, 768] × [768, 100k]` (RAG)     |   6.0 |   25.6  |   17× |                 2.1×  |
+| `[1, 1536] × [1536, 100k]`         |   8.7 |   35.3  |    —  |                 1.1×  |
+| `[64, 768] × [768, 100k]`          | 145.6 |   67.5  |    —  |                 1.0×  |
+| `[256, 768] × [768, 100k]` offline | 595.6 |   66.0  |    —  |                 —     |
+
+Takeaways: single-query RAG latency ≈ 6–9 ms at d=768/1536 over a 100k corpus; p99/p50 well under the plan's 10× threshold under sustained burst — no event-loop starvation under sync dispatch. H100 numbers are deferred until a RunPod reproduction; expected to widen the vs-JS ratio by roughly the H100/M4 FLOPS gap but be dominated by `[B, N]` D2H for large N (where GPU top-k would help; see plan Step 2 notes).
+
+`searchHandle` API surface (see [matmul/README.md](../matmul/README.md#phase-3d--rag-shape-cached-matmul--fused-top-k)): three calls — `loadMatrixGpu` for corpus (once at boot), `loadMatrixGpu` for query (per request), `searchHandle(hA, hB, idxU32, scoresF32)`. End-to-end demo at [examples/rag-demo/search.js](../examples/rag-demo/search.js).

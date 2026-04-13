@@ -84,6 +84,41 @@ The regression test ([test_cached.js](test_cached.js)) accommodates this with `r
 
 The previous "flagship" Phase 2 result was 91.4× at 2048² on M4 (CPU parallel). GPU cached on H100 is **310× faster than that**.
 
+## Phase 3d — RAG-shape cached matmul + fused top-k
+
+The 28,343× headline is 2048² square. The realistic Node.js market for this kernel is **local embedding retrieval** (query × corpus.T), where the shape is tall-skinny — `[B, d] × [d, N]` with B=1..256, d=768/1536, N=10k..1M. Lower arithmetic intensity than the square case, and the `[B, N]` D2H of scores adds per-call cost.
+
+### searchHandle — fused matmul + per-row top-k
+
+To make the RAG path a one-call primitive, `matmul_cached.node` exports `searchHandle`:
+
+```js
+const hQuery  = cached.loadMatrixGpu(queryEmbeddings, B, dim);   // [B, dim]
+const hCorpus = cached.loadMatrixGpu(corpusT,         dim, N);   // [dim, N]
+const idx     = new Uint32Array(B * k);
+const scores  = new Float32Array(B * k);
+cached.searchHandle(hQuery, hCorpus, idx, scores);   // k inferred from idx.length / B
+```
+
+Implementation: runs the existing `linalg.matmul` into a device scores buffer, D2Hs the `[B, N]` matrix, then a host-side min-heap top-k per row (O(N log k), descending by score). A GPU top-k kernel would save the full-scores D2H and is an obvious future optimization if profiling shows D2H dominates.
+
+### M4 Metal results (local dev benchmark)
+
+Run: `node matmul/matmul_rag.js` (append `--concurrency=100` for latency percentiles, `--full` for 1M-corpus shapes).
+
+| Shape                              | GPU cached ms/op | GFLOP/s | p50 / p99 (burst=100) |
+| ---------------------------------- | ---------------: | ------: | --------------------: |
+| `[1, 768] × [768, 100k]` (RAG)     |           6.0 ms |   25.6  |     5.8 / 12.2 ms     |
+| `[1, 1536] × [1536, 100k]`         |           8.7 ms |   35.3  |      8.6 / 9.5 ms     |
+| `[64, 768] × [768, 100k]`          |         145.6 ms |   67.5  |    146.1 / 152.6 ms   |
+| `[256, 768] × [768, 100k]` offline |         595.6 ms |   66.0  |                 —     |
+
+Honest numbers: 17–21× vs single-threaded JS on single-query RAG — far from the 28,343× square-case headline, but 5–9 ms single-query latency is already well below what a hosted vector-DB round-trip would cost, and `p99 / p50 ≈ 2.1×` under a 100-call burst confirms no event-loop starvation under sustained sync load.
+
+### End-to-end RAG demo
+
+See [`examples/rag-demo/search.js`](../examples/rag-demo/search.js) — ~80 lines of Node wrapping `searchHandle` into a `GpuIndex.search(query, k)` method. Generates a synthetic 10k × 768 corpus, runs a self-similarity query, prints the top 10 at ~7 ms/query on M4 Metal. Swap `makeSyntheticCorpus` for a loader over your real precomputed embeddings.
+
 ## Build & Run
 
 ```bash
@@ -91,7 +126,9 @@ The previous "flagship" Phase 2 result was 91.4× at 2048² on M4 (CPU parallel)
 pixi run bash matmul/build.sh
 node matmul/matmul.js
 
-# New cached GPU matmul (Phase 3c.2):
+# Cached GPU matmul (Phase 3c.2) + RAG primitive (Phase 3d):
 pixi run bash matmul/build_cached.sh
 node matmul/matmul_cached.js
+node matmul/matmul_rag.js --concurrency=100
+node examples/rag-demo/search.js
 ```
