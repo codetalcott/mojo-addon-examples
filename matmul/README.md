@@ -104,22 +104,39 @@ Implementation: runs the existing `linalg.matmul` into a device scores buffer, D
 
 ### M4 Metal results (local dev benchmark)
 
-Run: `node matmul/matmul_rag.js` (append `--concurrency=100` for latency percentiles, `--full` for 1M-corpus shapes, `--no-ort` to skip the ORT baseline).
+Run: `node matmul/matmul_rag.js` (append `--concurrency=100` for latency percentiles, `--full` for 1M-corpus shapes, `--no-ort` / `--no-hnsw` to skip baselines).
 
-Three-path comparison: single-threaded JS · `onnxruntime-node` CPU matmul (MLAS → Apple Accelerate) · our cached GPU path.
+Three-path matmul comparison: single-threaded JS · `onnxruntime-node` CPU matmul (MLAS → Apple Accelerate) · our cached GPU path.
 
 | Shape                              |   JS    | ORT CPU  | GPU cached | vs ORT |
 | ---------------------------------- | ------: | -------: | ---------: | -----: |
-| `[1, 768] × [768, 100k]` (RAG)     | 97.8 ms | 19.1 ms  | **5.6 ms** | **3.4× win** |
-| `[1, 1536] × [1536, 100k]`         |  (skip) | 38.4 ms  | **7.5 ms** | **5.1× win** |
-| `[64, 768] × [768, 100k]`          |  (skip) | **31.3 ms** | 145.3 ms | 4.6× ORT win |
-| `[256, 768] × [768, 100k]` offline |  (skip) | **56.7 ms** | 588.3 ms | 10× ORT win  |
+| `[1, 768] × [768, 100k]` (RAG)     | 90.6 ms | 19.6 ms  | **5.6 ms** | **3.5× win** |
+| `[1, 1536] × [1536, 100k]`         |  (skip) | 38.2 ms  | **6.9 ms** | **5.6× win** |
+| `[64, 768] × [768, 100k]`          |  (skip) | **30.3 ms** | 147.8 ms | 4.9× ORT win |
+| `[256, 768] × [768, 100k]` offline |  (skip) | **58.9 ms** | 590.5 ms | 10× ORT win  |
 
 Honest reading:
 
-- **Single-query RAG (B=1)**: cached GPU is 3–5× faster than the best Node CPU option. 5–9 ms latency is below what a hosted vector-DB round-trip costs. This is the latency play.
+- **Single-query RAG (B=1)**: cached GPU is 3–5× faster than the best Node CPU option. 5–7 ms latency is below what a hosted vector-DB round-trip costs. This is the latency play.
 - **Batched matmul on M4 Metal**: ORT CPU wins decisively. MLAS/Accelerate sustains ~700 GFLOP/s on batched `MatMul`; our `linalg.matmul[target="gpu"]` path stays flat at ~67 GFLOP/s regardless of batch size on M4, and the `[B, N]` D2H scales with B. The throughput play requires a GPU with tensor cores and HBM — H100 numbers pending.
 - **Event-loop stability**: `p99 / p50 = 2.1×` at single-query under a 100-call burst (`--concurrency=100`) — no starvation under sustained sync dispatch.
+
+### RAG product comparison — exact GPU vs approximate HNSW
+
+When the question is "top-k semantic search" rather than "matmul backend," the right competitor is `hnswlib-node` (approximate nearest neighbor). Bench builds an HNSW index once (4–5 min at N=100k × d=768, amortized like `loadMatrixGpu`), then sweeps the query-time `ef` parameter (higher = better recall, slower).
+
+`[1, 768] × [768, 100k]` at k=10, recall measured against exact ground truth:
+
+| Baseline            | Latency  | Recall@10 | Notes |
+| ------------------- | -------: | --------: | ----- |
+| HNSW `ef=100`       |  1.1 ms  |     0.10  | HNSW's default; fast but nearly useless on our synthetic data |
+| HNSW `ef=500`       |  5.3 ms  |     0.10  | Roughly equal latency to GPU exact, 10× worse recall |
+| HNSW `ef=2000`      | 18.2 ms  |     0.70  | Still sub-perfect recall; GPU exact is 3× faster |
+| **GPU `searchHandle`** | **6.0 ms** | **1.00** | Exact; fused matmul + host min-heap top-k |
+
+At larger batches (B=64, 256), GPU exact pulls further ahead: at k=10 recall 0.65–0.70, HNSW ef=2000 runs **7× slower** than GPU exact.
+
+**Important caveat on the HNSW numbers:** the bench uses L2-normalized random vectors, which are worst-case for graph-based ANN — concentration of measure in high dim makes "top-10 nearest" a near-tie among thousands of candidates, and HNSW's graph can't discriminate. On real sentence-transformer embeddings (clustered, lower effective dimensionality), HNSW at `ef=100` routinely hits recall > 0.95. The takeaway: the exact path's value is recall, not raw latency; users who can tolerate approximate results should still benchmark HNSW on their actual data.
 
 The ORT baseline uses a dynamic-shape MatMul graph at [matmul/fixtures/matmul_dyn.onnx](fixtures/matmul_dyn.onnx) (118 bytes, regenerable via the one-liner in the file header).
 
