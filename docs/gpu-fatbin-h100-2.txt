@@ -1,0 +1,278 @@
+
+Build complete: build/gpu.node (--target-accelerator sm_80)
+
+===== 5b. Verify PTX-text embedding on Linux (should match macOS result: 3 modules, target sm_80) =====
+target markers: 3
+version markers: 3
+cubin/fatbin markers: 0
+binary size: 240472 bytes
+kernels:
+.visible .entry matmul_kernel_naive_float32_float32_float32_False_16_bd355c67(
+.visible .entry gevm_kernel_float32_float32_float32_1024_83a10138(
+.visible .entry gemv_kernel_float32_float32_float32_False_51f413da(
+
+===== 5c. ldd (Question 2 data — MAX runtime deps) =====
+        linux-vdso.so.1 (0x00007ffd9d587000)
+        libKGENCompilerRTShared.so => /workspace/napi-mojo/.pixi/envs/default/lib/libKGENCompilerRTShared.so (0x000072be5ba1c000)
+        libAsyncRTMojoBindings.so => /workspace/napi-mojo/.pixi/envs/default/lib/libAsyncRTMojoBindings.so (0x000072be5b922000)
+        libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x000072be5b6f3000)
+        libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x000072be5b60a000)
+        libstdc++.so.6 => /workspace/napi-mojo/.pixi/envs/default/lib/libstdc++.so.6 (0x000072be5b38b000)
+        libMSupportGlobals.so => /workspace/napi-mojo/.pixi/envs/default/lib/libMSupportGlobals.so (0x000072be5b37d000)
+        libAsyncRTRuntimeGlobals.so => /workspace/napi-mojo/.pixi/envs/default/lib/libAsyncRTRuntimeGlobals.so (0x000072be5a919000)
+        libNVPTX.so => /workspace/napi-mojo/.pixi/envs/default/lib/libNVPTX.so (0x000072be5715f000)
+        libgcc_s.so.1 => /workspace/napi-mojo/.pixi/envs/default/lib/libgcc_s.so.1 (0x000072be57130000)
+        /lib64/ld-linux-x86-64.so.2 (0x000072be5baeb000)
+        libdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x000072be5712b000)
+
+===== 6. npm install + run GPU tests (Path B end-to-end) =====
+npm notice
+npm notice New major version of npm available! 10.9.7 -> 11.12.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.12.1
+npm notice To update run: npm install -g npm@11.12.1
+npm notice
+
+> napi-mojo@0.4.0 test
+> jest tests/gpu-matmul.test.js
+
+FAIL tests/gpu-matmul.test.js
+  GPU matmul — handle lifecycle
+    ✓ loadMatrixGpu returns an external handle (113 ms)
+    ✓ matmulHandle on a released handle throws (6 ms)
+    ✓ dst buffer too small throws
+    ✓ dimension mismatch throws (1 ms)
+  GPU matmul — correctness
+    ✓ 2x2 identity × 2x2 == 2x2 (small hand-checkable case) (111 ms)
+    ✕ [4, 64] x [64, 1000] matches JS reference within rtol=1e-4 (29 ms)
+  GPU search — top-k correctness
+    ✓ searchHandle top-10 matches brute-force sort on [1, 32] × [32, 500] (24 ms)
+    ✓ searchHandle with batch B=4 returns per-row top-k (2 ms)
+
+  ● GPU matmul — correctness › [4, 64] x [64, 1000] matches JS reference within rtol=1e-4
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 0
+    Received: 639
+
+      113 |       if (Math.abs(dst[i] - expected[i]) > tol) mismatches++;
+      114 |     }
+    > 115 |     expect(mismatches).toBe(0);
+          |                        ^
+      116 |   });
+      117 | });
+      118 |
+
+      at Object.toBe (tests/gpu-matmul.test.js:115:24)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 7 passed, 8 total
+Snapshots:   0 total
+Time:        1.422 s
+Ran all test suites matching /tests\/gpu-matmul.test.js/i.
+sm_80 cold run exit=1 total_ms=2033
+sm_80 warm run exit=1 total_ms=1356
+
+===== 7a. Build native sm_90 for perf comparison (skip if not on Hopper+) =====
+/workspace/napi-mojo/src/napi/raw.mojo:1330:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(
+        ^
+Included from /workspace/napi-mojo/src/gpu/lib.mojo:13:
+/workspace/napi-mojo/src/napi/raw.mojo:3228:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(
+        ^
+Included from /workspace/napi-mojo/src/gpu/lib.mojo:13:
+/workspace/napi-mojo/src/napi/raw.mojo:3248:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(
+        ^
+Included from /workspace/napi-mojo/src/gpu/lib.mojo:13:
+/workspace/napi-mojo/src/napi/raw.mojo:3269:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(NapiEnv, NapiValue, OpaquePointer[MutAnyOrigin]) abi("C") -> NapiStatus
+        ^
+Included from /workspace/napi-mojo/src/gpu/lib.mojo:13:
+/workspace/napi-mojo/src/napi/raw.mojo:3281:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(NapiEnv, NapiValue, OpaquePointer[MutAnyOrigin]) abi("C") -> NapiStatus
+        ^
+Build complete: build/gpu.node (--target-accelerator sm_90)
+sm_90 warm run exit=1 total_ms=1585
+
+===== 8. Summary =====
+=== Path B validation summary ===
+GPU: NVIDIA H100 80GB HBM3, 9.0, 580.126.09
+
+PTX inspection (sm_80 Linux build):
+target markers: 3
+version markers: 3
+cubin/fatbin markers: 0
+binary size: 240472 bytes
+kernels:
+.visible .entry matmul_kernel_naive_float32_float32_float32_False_16_bd355c67(
+.visible .entry gevm_kernel_float32_float32_float32_1024_83a10138(
+.visible .entry gemv_kernel_float32_float32_float32_False_51f413da(
+
+Timings:
+sm_80 cold run exit=1 total_ms=2033
+sm_80 warm run exit=1 total_ms=1356
+sm_90 warm run exit=1 total_ms=1585
+
+Verdict:
+  FAIL — sm_80 PTX did not run on sm_90. Check test-sm80-cold.log.
+
+===== 9. Consolidate all text artifacts into ~/gpu-fatbin.txt =====
+
+Artifacts in /workspace/results:
+total 508
+drwxr-xr-x 2 root root   4096 Apr 15 19:01 .
+drwxr-xr-x 1 root root     72 Apr 15 19:00 ..
+-rw-r--r-- 1 root root    622 Apr 15 19:01 SUMMARY.txt
+-rw-r--r-- 1 root root     73 Apr 15 19:00 gpu-info.txt
+-rwxr-xr-x 1 root root 240472 Apr 15 19:01 gpu.sm80.node
+-rwxr-xr-x 1 root root 240472 Apr 15 19:01 gpu.sm90.node
+-rw-r--r-- 1 root root   1062 Apr 15 19:01 ldd-sm80.txt
+-rw-r--r-- 1 root root    310 Apr 15 19:01 ptx-inspection-sm80.txt
+-rw-r--r-- 1 root root   1314 Apr 15 19:01 test-sm80-cold.log
+-rw-r--r-- 1 root root   1329 Apr 15 19:01 test-sm80-warm.log
+-rw-r--r-- 1 root root   1337 Apr 15 19:01 test-sm90-warm.log
+-rw-r--r-- 1 root root    108 Apr 15 19:01 timings.txt
+
+Consolidated report at ~/gpu-fatbin.txt (140 lines)
+################################################################
+# Path B spike results — 2026-04-15T19:01:50Z
+################################################################
+
+===== SUMMARY.txt =====
+=== Path B validation summary ===
+GPU: NVIDIA H100 80GB HBM3, 9.0, 580.126.09
+
+PTX inspection (sm_80 Linux build):
+target markers: 3
+version markers: 3
+cubin/fatbin markers: 0
+binary size: 240472 bytes
+kernels:
+.visible .entry matmul_kernel_naive_float32_float32_float32_False_16_bd355c67(
+.visible .entry gevm_kernel_float32_float32_float32_1024_83a10138(
+.visible .entry gemv_kernel_float32_float32_float32_False_51f413da(
+
+Timings:
+sm_80 cold run exit=1 total_ms=2033
+sm_80 warm run exit=1 total_ms=1356
+sm_90 warm run exit=1 total_ms=1585
+
+Verdict:
+  FAIL — sm_80 PTX did not run on sm_90. Check test-sm80-cold.log.
+
+===== gpu-info.txt =====
+name, compute_cap, driver_version
+NVIDIA H100 80GB HBM3, 9.0, 580.126.09
+
+===== ptx-inspection-sm80.txt =====
+target markers: 3
+version markers: 3
+cubin/fatbin markers: 0
+binary size: 240472 bytes
+kernels:
+.visible .entry matmul_kernel_naive_float32_float32_float32_False_16_bd355c67(
+.visible .entry gevm_kernel_float32_float32_float32_1024_83a10138(
+.visible .entry gemv_kernel_float32_float32_float32_False_51f413da(
+
+===== ldd-sm80.txt =====
+        linux-vdso.so.1 (0x00007ffd9d587000)
+        libKGENCompilerRTShared.so => /workspace/napi-mojo/.pixi/envs/default/lib/libKGENCompilerRTShared.so (0x000072be5ba1c000)
+        libAsyncRTMojoBindings.so => /workspace/napi-mojo/.pixi/envs/default/lib/libAsyncRTMojoBindings.so (0x000072be5b922000)
+        libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x000072be5b6f3000)
+        libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x000072be5b60a000)
+        libstdc++.so.6 => /workspace/napi-mojo/.pixi/envs/default/lib/libstdc++.so.6 (0x000072be5b38b000)
+        libMSupportGlobals.so => /workspace/napi-mojo/.pixi/envs/default/lib/libMSupportGlobals.so (0x000072be5b37d000)
+        libAsyncRTRuntimeGlobals.so => /workspace/napi-mojo/.pixi/envs/default/lib/libAsyncRTRuntimeGlobals.so (0x000072be5a919000)
+        libNVPTX.so => /workspace/napi-mojo/.pixi/envs/default/lib/libNVPTX.so (0x000072be5715f000)
+        libgcc_s.so.1 => /workspace/napi-mojo/.pixi/envs/default/lib/libgcc_s.so.1 (0x000072be57130000)
+        /lib64/ld-linux-x86-64.so.2 (0x000072be5baeb000)
+        libdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x000072be5712b000)
+
+===== timings.txt =====
+sm_80 cold run exit=1 total_ms=2033
+sm_80 warm run exit=1 total_ms=1356
+sm_90 warm run exit=1 total_ms=1585
+
+===== test-sm80-cold.log (last 80 lines) =====
+
+> napi-mojo@0.4.0 test
+> jest tests/gpu-matmul.test.js
+
+FAIL tests/gpu-matmul.test.js
+  GPU matmul — handle lifecycle
+    ✓ loadMatrixGpu returns an external handle (113 ms)
+    ✓ matmulHandle on a released handle throws (6 ms)
+    ✓ dst buffer too small throws
+    ✓ dimension mismatch throws (1 ms)
+  GPU matmul — correctness
+    ✓ 2x2 identity × 2x2 == 2x2 (small hand-checkable case) (111 ms)
+    ✕ [4, 64] x [64, 1000] matches JS reference within rtol=1e-4 (29 ms)
+  GPU search — top-k correctness
+    ✓ searchHandle top-10 matches brute-force sort on [1, 32] × [32, 500] (24 ms)
+    ✓ searchHandle with batch B=4 returns per-row top-k (2 ms)
+
+  ● GPU matmul — correctness › [4, 64] x [64, 1000] matches JS reference within rtol=1e-4
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 0
+    Received: 639
+
+      113 |       if (Math.abs(dst[i] - expected[i]) > tol) mismatches++;
+      114 |     }
+    > 115 |     expect(mismatches).toBe(0);
+          |                        ^
+      116 |   });
+      117 | });
+      118 |
+
+      at Object.toBe (tests/gpu-matmul.test.js:115:24)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 7 passed, 8 total
+Snapshots:   0 total
+Time:        1.422 s
+Ran all test suites matching /tests\/gpu-matmul.test.js/i.
+
+===== test-sm90-warm.log (last 40 lines) =====
+
+> napi-mojo@0.4.0 test
+> jest tests/gpu-matmul.test.js
+
+FAIL tests/gpu-matmul.test.js
+  GPU matmul — handle lifecycle
+    ✓ loadMatrixGpu returns an external handle (117 ms)
+    ✓ matmulHandle on a released handle throws (10 ms)
+    ✓ dst buffer too small throws (1 ms)
+    ✓ dimension mismatch throws (1 ms)
+  GPU matmul — correctness
+    ✓ 2x2 identity × 2x2 == 2x2 (small hand-checkable case) (112 ms)
+    ✕ [4, 64] x [64, 1000] matches JS reference within rtol=1e-4 (26 ms)
+  GPU search — top-k correctness
+    ✓ searchHandle top-10 matches brute-force sort on [1, 32] × [32, 500] (26 ms)
+    ✓ searchHandle with batch B=4 returns per-row top-k (2 ms)
+
+  ● GPU matmul — correctness › [4, 64] x [64, 1000] matches JS reference within rtol=1e-4
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 0
+    Received: 672
+
+      113 |       if (Math.abs(dst[i] - expected[i]) > tol) mismatches++;
+      114 |     }
+    > 115 |     expect(mismatches).toBe(0);
+          |                        ^
+      116 |   });
+      117 | });
+      118 |
+
+      at Object.toBe (tests/gpu-matmul.test.js:115:24)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 7 passed, 8 total
+Snapshots:   0 total
+Time:        0.989 s, estimated 1 s
+Ran all test suites matching /tests\/gpu-matmul.test.js/i.

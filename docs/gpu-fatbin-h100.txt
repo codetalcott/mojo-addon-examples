@@ -1,0 +1,92 @@
+
+===== 0. GPU info (confirm we are NOT on sm_80) =====
+name, compute_cap, driver_version
+NVIDIA H100 80GB HBM3, 9.0, 580.126.09
+Detected compute_cap: 90 (expect 90 for H100, 89 for L4/4090, NOT 80)
+
+
+===== 5a. Build GPU addon for sm_80 (Path B test target) =====
+/workspace/napi-mojo/src/napi/raw.mojo:1330:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(
+        ^
+Included from /workspace/napi-mojo/src/gpu/lib.mojo:13:
+/workspace/napi-mojo/src/napi/raw.mojo:3228:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(
+        ^
+Included from /workspace/napi-mojo/src/gpu/lib.mojo:13:
+/workspace/napi-mojo/src/napi/raw.mojo:3248:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(
+        ^
+Included from /workspace/napi-mojo/src/gpu/lib.mojo:13:
+/workspace/napi-mojo/src/napi/raw.mojo:3269:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(NapiEnv, NapiValue, OpaquePointer[MutAnyOrigin]) abi("C") -> NapiStatus
+        ^
+Included from /workspace/napi-mojo/src/gpu/lib.mojo:13:
+/workspace/napi-mojo/src/napi/raw.mojo:3281:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(NapiEnv, NapiValue, OpaquePointer[MutAnyOrigin]) abi("C") -> NapiStatus
+        ^
+Build complete: build/gpu.node (--target-accelerator sm_80)
+
+===== 5b. Verify PTX-text embedding on Linux (should match macOS result: 3 modules, target sm_80) =====
+target markers: 3
+version markers: 3
+cubin/fatbin markers: 0
+binary size: 240472 bytes
+kernels:
+.visible .entry matmul_kernel_naive_float32_float32_float32_False_16_bd355c67(
+.visible .entry gevm_kernel_float32_float32_float32_1024_83a10138(
+.visible .entry gemv_kernel_float32_float32_float32_False_51f413da(
+
+===== 5c. ldd (Question 2 data — MAX runtime deps) =====
+        linux-vdso.so.1 (0x00007ffd0ad98000)
+        libKGENCompilerRTShared.so => /workspace/napi-mojo/.pixi/envs/default/lib/libKGENCompilerRTShared.so (0x00007b4a98b20000)
+        libAsyncRTMojoBindings.so => /workspace/napi-mojo/.pixi/envs/default/lib/libAsyncRTMojoBindings.so (0x00007b4a98a26000)
+        libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007b4a987f7000)
+        libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007b4a9870e000)
+        libstdc++.so.6 => /workspace/napi-mojo/.pixi/envs/default/lib/libstdc++.so.6 (0x00007b4a9848f000)
+        libMSupportGlobals.so => /workspace/napi-mojo/.pixi/envs/default/lib/libMSupportGlobals.so (0x00007b4a98481000)
+        libAsyncRTRuntimeGlobals.so => /workspace/napi-mojo/.pixi/envs/default/lib/libAsyncRTRuntimeGlobals.so (0x00007b4a97a1d000)
+        libNVPTX.so => /workspace/napi-mojo/.pixi/envs/default/lib/libNVPTX.so (0x00007b4a94263000)
+        libgcc_s.so.1 => /workspace/napi-mojo/.pixi/envs/default/lib/libgcc_s.so.1 (0x00007b4a94234000)
+        /lib64/ld-linux-x86-64.so.2 (0x00007b4a98bef000)
+        libdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007b4a9422f000)
+
+===== 6. npm install + run GPU tests (Path B end-to-end) =====
+npm notice
+npm notice New major version of npm available! 10.8.2 -> 11.12.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.12.1
+npm notice To update run: npm install -g npm@11.12.1
+npm notice
+
+> napi-mojo@0.4.0 test
+> jest tests/gpu-matmul.test.js
+
+ABORT: oss/modular/mojo/stdlib/std/ffi/__init__.mojo:628:18: symbol not found: node_api_create_buffer_from_arraybuffer
+Illegal instruction (core dumped)
+sm_80 cold run exit=132 total_ms=1785
+sm_80 warm run exit=132 total_ms=739
+
+===== 7a. Build native sm_90 for perf comparison (skip if not on Hopper+) =====
+/workspace/napi-mojo/src/napi/raw.mojo:1330:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(
+        ^
+Included from /workspace/napi-mojo/src/gpu/lib.mojo:13:
+/workspace/napi-mojo/src/napi/raw.mojo:3228:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(
+        ^
+Included from /workspace/napi-mojo/src/gpu/lib.mojo:13:
+/workspace/napi-mojo/src/napi/raw.mojo:3248:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(
+        ^
+Included from /workspace/napi-mojo/src/gpu/lib.mojo:13:
+/workspace/napi-mojo/src/napi/raw.mojo:3269:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(NapiEnv, NapiValue, OpaquePointer[MutAnyOrigin]) abi("C") -> NapiStatus
+        ^
+Included from /workspace/napi-mojo/src/gpu/lib.mojo:13:
+/workspace/napi-mojo/src/napi/raw.mojo:3281:9: warning: omitting 'thin' in function types is deprecated; specify 'capturing', 'unified', or 'thin'
+        def(NapiEnv, NapiValue, OpaquePointer[MutAnyOrigin]) abi("C") -> NapiStatus
+        ^
+Build complete: build/gpu.node (--target-accelerator sm_90)
+sm_90 warm run exit=132 total_ms=1643
+
+===== 7b. Build generic cuda target (Path C probe) — may be slow =====
