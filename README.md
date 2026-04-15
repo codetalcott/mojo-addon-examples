@@ -11,7 +11,7 @@ High-performance Node.js addon examples built with [napi-mojo](https://github.co
 Four implementations showing Mojo's optimization story, from naive triple loop to SIMD + tiled + parallel:
 
 ```
-node matmul/matmul.js
+node examples/matmul/matmul.js
 ```
 
 **Results (M4 Mac, CPU, Float64):**
@@ -29,7 +29,7 @@ node matmul/matmul.js
 SIMD byte scanning that's impossible to express in pure JavaScript. Three functions: `countByte`, `countLines`, `searchAll` (single and multi-byte patterns).
 
 ```
-node simd-search/search.js
+node examples/simd-search/search.js
 ```
 
 **Results (M4 Mac, Buffer/Uint8Array):**
@@ -42,14 +42,14 @@ node simd-search/search.js
 | searchAll (1-byte) | 2.5x | 2.8x | 3.1x | Two-pass: SIMD count + collect |
 | searchAll (multi-byte) | 2.0x | 2.3x | 2.5x | First+last byte SIMD filter |
 
-`countByteGpu()` is published honestly: at 100MB it's 2.3× JS vs CPU SIMD's 67.6× — a 30× gap. Byte-scan kernels on integrated GPUs are copy-bound rather than compute-bound; the M4 CPU's direct DRAM access wins decisively. Output matches the CPU path exactly. See [simd-search/README.md](simd-search/README.md) for why, and expected-to-flip-on-H100 notes.
+`countByteGpu()` is published honestly: at 100MB it's 2.3× JS vs CPU SIMD's 67.6× — a 30× gap. Byte-scan kernels on integrated GPUs are copy-bound rather than compute-bound; the M4 CPU's direct DRAM access wins decisively. Output matches the CPU path exactly. See [examples/simd-search/README.md](examples/simd-search/README.md) for why, and expected-to-flip-on-H100 notes.
 
 ### Statistics — SIMD Aggregation
 
 Compute `{mean, stddev, min, max, p50, p95, p99}` on Float64Arrays in a single call. SIMD reductions + parallel accumulation + quickselect percentiles.
 
 ```
-node stats/stats.js
+node examples/stats/stats.js
 ```
 
 **Results (M4 Mac, Float64):**
@@ -60,14 +60,14 @@ node stats/stats.js
 | stats() GPU Metal | 2.1x | 4.0x | 4.2x | Shared-memory tree reduction via `DeviceContext` (Float32 internal) |
 | histogram() CPU | 3.7x | 3.9x | 4.0x | SIMD min/max range detection |
 
-`statsGpu()` runs on the M4's integrated GPU via Mojo's Metal 4 backend. Kernels are Float32 (Metal constraint); the H2D cast and final Float64 reduction happen on the host. See [stats/README.md](stats/README.md) for precision notes.
+`statsGpu()` runs on the M4's integrated GPU via Mojo's Metal 4 backend. Kernels are Float32 (Metal constraint); the H2D cast and final Float64 reduction happen on the host. See [examples/stats/README.md](examples/stats/README.md) for precision notes.
 
 ### Image Processing — Pixel Operations
 
 Four RGBA pixel operations on Uint8Arrays: `grayscale`, `brightness`, `threshold`, `blur`. Integer-approximation grayscale, fixed-point brightness, separable box blur with parallel horizontal + vertical passes.
 
 ```
-node image/image.js
+node examples/image/image.js
 ```
 
 **Results (M4 Mac, RGBA Uint8Array):**
@@ -80,14 +80,14 @@ node image/image.js
 | threshold | 5.5x | 5.2x | **6.5x** | Grayscale + compare, `parallelize()` |
 | **blur(r=5)** | 6.8x | **10.1x** | 5.6x | Separable box blur, parallel rows + cols |
 
-`grayscaleGpu()` is published despite being **slower than JS** because it illustrates an important limit: on integrated GPUs (M4's unified memory architecture), the H2D/D2H "copies" are pure overhead with no bandwidth benefit. For a trivial per-pixel kernel the copy cost dominates. Output matches the CPU path byte-for-byte. On a discrete GPU with real HBM the ordering is expected to flip — see [image/README.md](image/README.md).
+`grayscaleGpu()` is published despite being **slower than JS** because it illustrates an important limit: on integrated GPUs (M4's unified memory architecture), the H2D/D2H "copies" are pure overhead with no bandwidth benefit. For a trivial per-pixel kernel the copy cost dominates. Output matches the CPU path byte-for-byte. On a discrete GPU with real HBM the ordering is expected to flip — see [examples/image/README.md](examples/image/README.md).
 
 ### wyhash — Fast Non-Cryptographic Hash
 
 Match C hash performance in ~50 lines of Mojo. `wyHash` returns BigInt (full 64-bit), `wyHash64` returns Number (lossy but no BigInt allocation overhead). The speed comes from 128-bit folded multiplies via Mojo's native `DType.uint128`.
 
 ```
-node wyhash/hash.js
+node examples/wyhash/hash.js
 ```
 
 **Results (M4 Mac, CPU, Buffer):**
@@ -113,7 +113,7 @@ This is the opposite of the narrative in most "port to GPU" benchmarks, and it's
 | 1M | 5.3× | 5.2× |
 | 10M | **8.3×** | 7.6× |
 
-Two factors drag stats on GPU: (1) the Float64→Float32 cast runs as a scalar host loop at [stats/addon.mojo:327](stats/addon.mojo#L327) — at 10M elements this alone is tens of ms per call — and (2) stats does two separate passes (`{sum,min,max}` then `sum_sq_diff(mean)`), each with its own allocation + copy cycle, doubling per-call overhead.
+Two factors drag stats on GPU: (1) the Float64→Float32 cast runs as a scalar host loop at [examples/stats/addon.mojo:327](examples/stats/addon.mojo#L327) — at 10M elements this alone is tens of ms per call — and (2) stats does two separate passes (`{sum,min,max}` then `sum_sq_diff(mean)`), each with its own allocation + copy cycle, doubling per-call overhead.
 
 ### Image grayscale on H100 (4K RGBA)
 
@@ -169,14 +169,14 @@ Phase 3a shipped a new `search_cached.node` addon with a handle-based API that u
 
 The Phase 2d H100 run was valuable precisely *because* it was "negative": it identified PCIe as the bottleneck instead of compute, and that diagnosis is what made Phase 3a targeted rather than speculative. The one-shot `countByteGpu` still loses to CPU SIMD on H100 — that hasn't changed. What Phase 3a added is a parallel handle-based API for the workload shape where the loss doesn't have to happen.
 
-See [simd-search/README.md](simd-search/README.md) for the full API, 5-size table with `loadGpu` upload costs, break-even analysis, and the "when to use the handle API" decision rule. Phase 3b (extend the pattern to stats and image) and Phase 3c (tensor-core matmul) are now justified by the 3a result.
+See [examples/simd-search/README.md](examples/simd-search/README.md) for the full API, 5-size table with `loadGpu` upload costs, break-even analysis, and the "when to use the handle API" decision rule. Phase 3b (extend the pattern to stats and image) and Phase 3c (tensor-core matmul) are now justified by the 3a result.
 
 ## Phase 3b Cloud Benchmark Results — persistent buffers ported to grayscale and stats
 
 Phase 3b tested whether the Phase 3a persistent-buffer template generalizes beyond reductions. Two new cached addons:
 
-- [`image_cached.node`](image/addon_cached.mojo) — `loadImageGpu` + `grayscaleHandle(h, dst)` + `releaseImageGpu`. Transform kernel shape (output same size as input).
-- [`stats_cached.node`](stats/addon_cached.mojo) — `loadStatsGpu` + `statsHandle(h)` + `releaseStatsGpu`. Two reduction passes, Float64 input, multi-field result, CPU-side percentiles.
+- [`image_cached.node`](examples/image/addon_cached.mojo) — `loadImageGpu` + `grayscaleHandle(h, dst)` + `releaseImageGpu`. Transform kernel shape (output same size as input).
+- [`stats_cached.node`](examples/stats/addon_cached.mojo) — `loadStatsGpu` + `statsHandle(h)` + `releaseStatsGpu`. Two reduction passes, Float64 input, multi-field result, CPU-side percentiles.
 
 Both shipped with byte-exact correctness against the existing CPU paths (210 + 208 regression cases respectively) and run without crashes on M4. **H100 validation run**: 2026-04-11 on an H100 80GB HBM3 SXM5 via RunPod, same pod configuration as the Phase 3a run.
 
@@ -200,7 +200,7 @@ SXM is +6–11% better than PCIe at the top sizes. Phase 3a reproduces cleanly.
 
 **Result: template works, absolute speedup is small.** Cached beats GPU one-shot 4–6× at every resolution and beats CPU SIMD 1.2–2.1×. Break-even vs one-shot is 1 iteration. But the headline number at 4K (7.4× JS) is well below the Phase 3a countByte 105 MB result (1146× JS) — not because the template failed, but because grayscale is a transform with a per-call 33 MB D2H that can't be amortized. The strategy doc's risk #1 flagged this before the run: "grayscale output is the same size as the input... every `grayscaleHandle` call still pays ~3 ms of D2H at 4K. Cached GPU should beat CPU SIMD but by a much smaller margin than countByte — maybe 3-5× instead of 30×." Observed: 1.2× at 4K. Directionally correct, below the predicted ceiling.
 
-See [image/README.md](image/README.md#phase-3b1--cached-grayscale-api-nvidia-h100-80gb-hbm3) for the full teardown.
+See [examples/image/README.md](examples/image/README.md#phase-3b1--cached-grayscale-api-nvidia-h100-80gb-hbm3) for the full teardown.
 
 ### Phase 3b.2 stats cached on H100
 
@@ -212,7 +212,7 @@ See [image/README.md](image/README.md#phase-3b1--cached-grayscale-api-nvidia-h10
 
 **Result: template works, percentile quickselect dominates at 10M.** The cached API replaces the per-call scalar Float64→Float32 cast with a vectorized one-time cast and eliminates per-call PCIe upload and device allocation. At 100K–1M, cached ties or slightly beats CPU SIMD. At 10M the CPU-side percentile quickselect (p50/p95/p99 on 10M Float64) swamps everything at ~200–300 ms per call, so cached saves ~15 ms of GPU-related work per call but the wall clock is dominated by percentiles — giving a 3.5× JS result that's effectively measuring quickselect, not the cached GPU reduction. Note how the JS→CPU-SIMD ratio itself drops from 7.5× at 1M to 3.6× at 10M for the same reason.
 
-See [stats/README.md](stats/README.md#phase-3b2--cached-stats-api-nvidia-h100-80gb-hbm3) for the full teardown.
+See [examples/stats/README.md](examples/stats/README.md#phase-3b2--cached-stats-api-nvidia-h100-80gb-hbm3) for the full teardown.
 
 ### What Phase 3b validated and what it didn't
 
@@ -224,7 +224,7 @@ See [stats/README.md](stats/README.md#phase-3b2--cached-stats-api-nvidia-h100-80
 
 ## Phase 3c Cloud Benchmark Results — tensor-core matmul via `linalg.matmul`
 
-Phase 3c shipped a new [`matmul_cached.node`](matmul/addon_cached.mojo) addon that wraps MAX's production [`linalg.matmul`](https://github.com/modular/modular/tree/main/max/kernels/src/linalg) kernel with the Phase 3a persistent-buffer handle API. Upload A and B to the GPU once via `loadMatrixGpu`, then run `matmulHandle(hA, hB, dst)` many times. The kernel body is **5 lines** — no hand-rolled tensor-core code — because `linalg.matmul[target="gpu"](C, A, B, Optional(ctx))` handles tile scheduling, shared memory, swizzle patterns, and tensor-core dispatch internally.
+Phase 3c shipped a new [`matmul_cached.node`](examples/matmul/addon_cached.mojo) addon that wraps MAX's production [`linalg.matmul`](https://github.com/modular/modular/tree/main/max/kernels/src/linalg) kernel with the Phase 3a persistent-buffer handle API. Upload A and B to the GPU once via `loadMatrixGpu`, then run `matmulHandle(hA, hB, dst)` many times. The kernel body is **5 lines** — no hand-rolled tensor-core code — because `linalg.matmul[target="gpu"](C, A, B, Optional(ctx))` handles tile scheduling, shared memory, swizzle patterns, and tensor-core dispatch internally.
 
 ### matmul on H100 (FP32 inputs → TF32 tensor cores)
 
@@ -261,7 +261,7 @@ On H100, FP32 inputs run through tensor cores in TF32 (10-bit mantissa, same 8-b
 
 The persistent-buffer template generalizes across all four kernel shapes. What changes is the *ceiling*: PCIe sets it for transforms (3b.1), the CPU quickselect for stats (3b.2), and tensor-core arithmetic intensity lets matmul blow past both (3c). For cached GPU addons, **arithmetic intensity is the single biggest determinant of headline speedup**.
 
-See [matmul/README.md](matmul/README.md#phase-3c2--cached-gpu-matmul-via-linalgmatmul-nvidia-h100-80gb-hbm3) for the full teardown and [docs/cloud-benchmark-runbook.md](docs/cloud-benchmark-runbook.md) for reproduction.
+See [examples/matmul/README.md](examples/matmul/README.md#phase-3c2--cached-gpu-matmul-via-linalgmatmul-nvidia-h100-80gb-hbm3) for the full teardown and [docs/cloud-benchmark-runbook.md](docs/cloud-benchmark-runbook.md) for reproduction.
 
 ## When to Use Mojo
 
@@ -293,11 +293,11 @@ pixi install
 npm run build:all
 
 # Run benchmarks
-node matmul/matmul.js
-node simd-search/search.js
-node stats/stats.js
-node image/image.js
-node wyhash/hash.js
+node examples/matmul/matmul.js
+node examples/simd-search/search.js
+node examples/stats/stats.js
+node examples/image/image.js
+node examples/wyhash/hash.js
 ```
 
 ## Development

@@ -17,12 +17,12 @@
 
 const path = require('path');
 
-const CACHED_PATH = path.resolve(__dirname, '../../matmul/build/matmul_cached.node');
+const CACHED_PATH = path.resolve(__dirname, '../matmul/build/matmul_cached.node');
 let cached;
 try {
   cached = require(CACHED_PATH);
 } catch (e) {
-  console.error('matmul_cached.node not found — run: pixi run bash matmul/build_cached.sh');
+  console.error('matmul_cached.node not found — run: pixi run bash examples/matmul/build_cached.sh');
   process.exit(1);
 }
 

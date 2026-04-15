@@ -61,16 +61,16 @@ npm install
 nvidia-smi | head -20
 
 # Build all three GPU-enabled addons (build.sh scripts default to sm_90 on Linux x86_64)
-pixi run bash stats/build.sh
-pixi run bash image/build.sh
-pixi run bash simd-search/build.sh
+pixi run bash examples/stats/build.sh
+pixi run bash examples/image/build.sh
+pixi run bash examples/simd-search/build.sh
 
 # Also build the two CPU-only addons so `npm test` works
-pixi run bash matmul/build.sh
-pixi run bash wyhash/build.sh
+pixi run bash examples/matmul/build.sh
+pixi run bash examples/wyhash/build.sh
 
 # Phase 3d: cached matmul + RAG-shape benchmark
-pixi run bash matmul/build_cached.sh
+pixi run bash examples/matmul/build_cached.sh
 
 # Regression tests
 echo "=== REGRESSION TESTS ==="            > ~/bench-output.txt
@@ -79,15 +79,15 @@ npm test                                  >> ~/bench-output.txt 2>&1
 # GPU benchmarks
 echo ""                                   >> ~/bench-output.txt
 echo "=== STATS BENCHMARK ==="            >> ~/bench-output.txt
-node stats/stats.js 2>&1                  >> ~/bench-output.txt
+node examples/stats/stats.js 2>&1                  >> ~/bench-output.txt
 
 echo ""                                   >> ~/bench-output.txt
 echo "=== IMAGE BENCHMARK ==="            >> ~/bench-output.txt
-node image/image.js 2>&1                  >> ~/bench-output.txt
+node examples/image/image.js 2>&1                  >> ~/bench-output.txt
 
 echo ""                                   >> ~/bench-output.txt
 echo "=== SIMD-SEARCH BENCHMARK ==="      >> ~/bench-output.txt
-node simd-search/search.js 2>&1           >> ~/bench-output.txt
+node examples/simd-search/search.js 2>&1           >> ~/bench-output.txt
 
 echo ""                                   >> ~/bench-output.txt
 echo "=== MATMUL RAG-SHAPE BENCHMARK ===" >> ~/bench-output.txt
@@ -95,7 +95,7 @@ echo "=== MATMUL RAG-SHAPE BENCHMARK ===" >> ~/bench-output.txt
 # --concurrency=100 adds p50/p95/p99 under sustained burst per shape.
 # hnswlib build at N=100k, d=768 is CPU-bound (1-5 min on H100 host's Xeon);
 # the bench caches the build across shapes so the ~5 min cost is paid once.
-node matmul/matmul_rag.js --full --concurrency=100 2>&1 >> ~/bench-output.txt
+node examples/matmul/matmul_rag.js --full --concurrency=100 2>&1 >> ~/bench-output.txt
 
 echo ""                                   >> ~/bench-output.txt
 echo "=== nvidia-smi FINAL ==="           >> ~/bench-output.txt
@@ -147,9 +147,9 @@ Try **RunPod** ($1.99/hr — even cheaper):
 Some H100 instances report as `sm_90a` (architecture-specific feature set). If you see an error like `GPU architecture 'sm_90a' is not supported`, re-run the builds with an override:
 
 ```
-STATS_ACCEL="--target-accelerator sm_90a" pixi run bash stats/build.sh
-IMAGE_ACCEL="--target-accelerator sm_90a" pixi run bash image/build.sh
-SEARCH_ACCEL="--target-accelerator sm_90a" pixi run bash simd-search/build.sh
+STATS_ACCEL="--target-accelerator sm_90a" pixi run bash examples/stats/build.sh
+IMAGE_ACCEL="--target-accelerator sm_90a" pixi run bash examples/image/build.sh
+SEARCH_ACCEL="--target-accelerator sm_90a" pixi run bash examples/simd-search/build.sh
 ```
 
 For other NVIDIA GPUs: A100 → `sm_80`, A10 → `sm_86`, L40 → `sm_89`, B100/B200 → `sm_100a`.
@@ -205,15 +205,15 @@ At 105 MB the cached path hits **1.1 TB/s effective bandwidth** — about 37% of
 The standard bootstrap block above builds `search_cached.node` automatically only if you add it to the build list. Add these lines to the bootstrap between the existing builds and the benchmark section:
 
 ```bash
-pixi run bash simd-search/build_cached.sh
+pixi run bash examples/simd-search/build_cached.sh
 
 echo ""                                               >> ~/bench-output.txt
 echo "=== CACHED REGRESSION TEST ==="                 >> ~/bench-output.txt
-node simd-search/test_cached.js                       >> ~/bench-output.txt 2>&1
+node examples/simd-search/test_cached.js                       >> ~/bench-output.txt 2>&1
 
 echo ""                                               >> ~/bench-output.txt
 echo "=== SEARCH_CACHED BENCHMARK (PHASE 3a) ==="     >> ~/bench-output.txt
-node simd-search/search_cached.js                     >> ~/bench-output.txt 2>&1
+node examples/simd-search/search_cached.js                     >> ~/bench-output.txt 2>&1
 ```
 
 **Paste caveat observed during the 3a run**: RunPod's web terminal dropped several lines in the middle of a large paste block, leaving the bash session in a broken state that silently aborted after `npm test`. If you see the bootstrap stall or the output file stop growing mid-run, don't re-run the whole bootstrap — open a second web terminal and run the remaining commands directly from `/mojo-addon-examples` (the pod's PWD after git clone). The build outputs are persistent.
@@ -222,7 +222,7 @@ node simd-search/search_cached.js                     >> ~/bench-output.txt 2>&1
 
 If your results come back dramatically different from the Phase 2d or Phase 3a tables above, something is off:
 
-- **`countByteHandle` cached column much slower than 500× JS at 17MB**: `DeviceContext` is probably being recreated per query, or the partial-sums buffer isn't pinned. Check `_count_byte_cached` in [simd-search/addon_cached.mojo](../simd-search/addon_cached.mojo) — the only per-call work should be `enqueue_function`, `enqueue_copy` of the partial sums, and `synchronize`.
+- **`countByteHandle` cached column much slower than 500× JS at 17MB**: `DeviceContext` is probably being recreated per query, or the partial-sums buffer isn't pinned. Check `_count_byte_cached` in [examples/simd-search/addon_cached.mojo](../examples/simd-search/addon_cached.mojo) — the only per-call work should be `enqueue_function`, `enqueue_copy` of the partial sums, and `synchronize`.
 - **One-shot GPU column much slower than above** (e.g. stats 10M < 2× JS): `DeviceContext` is probably being recreated per call in the one-shot addon. Check the instance_data caching path in that addon's `register_module`.
 - **`Context leak detected` warnings in stderr**: N-API finalizer for the cached `DeviceContext` is misbehaving. Not fatal but investigate.
 - **Cached RSS growing on `test_cached.js` leak smoke**: expected *without* `--expose-gc` — the finalizer only fires during GC. With `--expose-gc` the 3a `search_cached` leak smoke shows zero growth on H100 and ~1 MB/iter on M4. Phase 3b.3 found the `image_cached` and `stats_cached` leak smokes also show growth on H100 (~3.3 MB/iter and ~0.7 MB/iter respectively), in addition to their M4 counterparts — so the "leaks only happen on synthetic load/release loops" pattern is cross-platform for the transform + multi-buffer templates. Production usage (load once, query many, release once) shows zero growth. Do not attempt to fix the cached addon — the template is unchanged from 3a and the extra leak correlates with the kernel-call-inside-release-cycle pattern.
@@ -242,9 +242,9 @@ Phase 3b.1 and 3b.2 shipped two new cached addons: `image_cached.node` (grayscal
 
 **Phase 3a reproduced on SXM with slightly better numbers** — countByte cached hit 1146.4× at 105 MB (vs 1030.7× on the PCIe variant from 2026-04-11), and CPU SIMD also improved (93.4× at 17 MB vs 42.9× on the earlier PCIe Xeon). SXM has higher HBM3 bandwidth and this particular pod had a faster Xeon than the earlier PCIe run. Sanity check passed.
 
-**Why grayscale is Red**: the strategy doc's risk #1 predicted this precisely. Every `grayscaleHandle` call still pays full D2H for the 33 MB output at 4K — ~3 ms at PCIe Gen4 ~12 GB/s — an irreducible floor. Amortizing `loadImageGpu` eliminates the H2D leg but not the D2H leg. CPU SIMD does 4K grayscale in 5.05 ms on this host; cached GPU does it in 4.29 ms. A 1.2× edge is the ceiling for this workload shape on this hardware. For transforms, the persistent-buffer template works but the absolute win is fundamentally smaller than for reductions. See [image/README.md](../image/README.md#phase-3b1--cached-grayscale-api-nvidia-h100-80gb-hbm3).
+**Why grayscale is Red**: the strategy doc's risk #1 predicted this precisely. Every `grayscaleHandle` call still pays full D2H for the 33 MB output at 4K — ~3 ms at PCIe Gen4 ~12 GB/s — an irreducible floor. Amortizing `loadImageGpu` eliminates the H2D leg but not the D2H leg. CPU SIMD does 4K grayscale in 5.05 ms on this host; cached GPU does it in 4.29 ms. A 1.2× edge is the ceiling for this workload shape on this hardware. For transforms, the persistent-buffer template works but the absolute win is fundamentally smaller than for reductions. See [examples/image/README.md](../examples/image/README.md#phase-3b1--cached-grayscale-api-nvidia-h100-80gb-hbm3).
 
-**Why stats is Red**: the cached template successfully eliminates the per-call scalar Float64→Float32 cast and the per-call H2D upload. At 100K and 1M, cached ties or slightly beats CPU SIMD (8.1× vs 8.4× / 8.1× vs 7.5× JS). At 10M, everything collapses because CPU-side percentile quickselect (p50/p95/p99) dominates at ~200–300 ms per call, swamping the ~15 ms of GPU-related per-call savings from caching. The JS→CPU-SIMD ratio itself drops from 7.5× at 1M to 3.6× at 10M for the same reason. The benchmark at 10M is measuring quickselect wall-clock, not cached GPU reduction wall-clock. Moving percentiles to the GPU (parallel quickselect / radix partition) is explicitly out of scope for Phase 3b per the strategy doc and is the natural unblock for this Red. See [stats/README.md](../stats/README.md#phase-3b2--cached-stats-api-nvidia-h100-80gb-hbm3).
+**Why stats is Red**: the cached template successfully eliminates the per-call scalar Float64→Float32 cast and the per-call H2D upload. At 100K and 1M, cached ties or slightly beats CPU SIMD (8.1× vs 8.4× / 8.1× vs 7.5× JS). At 10M, everything collapses because CPU-side percentile quickselect (p50/p95/p99) dominates at ~200–300 ms per call, swamping the ~15 ms of GPU-related per-call savings from caching. The JS→CPU-SIMD ratio itself drops from 7.5× at 1M to 3.6× at 10M for the same reason. The benchmark at 10M is measuring quickselect wall-clock, not cached GPU reduction wall-clock. Moving percentiles to the GPU (parallel quickselect / radix partition) is explicitly out of scope for Phase 3b per the strategy doc and is the natural unblock for this Red. See [examples/stats/README.md](../examples/stats/README.md#phase-3b2--cached-stats-api-nvidia-h100-80gb-hbm3).
 
 ### Reproducing Phase 3b
 
@@ -316,7 +316,7 @@ Phase 3 is complete with this result. The cached-template helpers (`JsExternal.c
 
 The 28,343× headline above is the square 2048² case. For the realistic Node.js market for this kernel — local embedding retrieval / RAG, where the shape is tall-skinny `[B, d] × [d, N]` — the number is much lower. Phase 3d adds the `searchHandle` primitive (fused matmul + host-side min-heap top-k) and a RAG-shape benchmark so the honest numbers are documented.
 
-**M4 Metal (local dev, `node matmul/matmul_rag.js --concurrency=100`):**
+**M4 Metal (local dev, `node examples/matmul/matmul_rag.js --concurrency=100`):**
 
 | Shape                              | ms/op | GFLOP/s | vs JS | p99 / p50 (burst=100) |
 | ---------------------------------- | ----: | ------: | ----: | --------------------: |
@@ -327,4 +327,4 @@ The 28,343× headline above is the square 2048² case. For the realistic Node.js
 
 Takeaways: single-query RAG latency ≈ 6–9 ms at d=768/1536 over a 100k corpus; p99/p50 well under the plan's 10× threshold under sustained burst — no event-loop starvation under sync dispatch. H100 numbers are deferred until a RunPod reproduction; expected to widen the vs-JS ratio by roughly the H100/M4 FLOPS gap but be dominated by `[B, N]` D2H for large N (where GPU top-k would help; see plan Step 2 notes).
 
-`searchHandle` API surface (see [matmul/README.md](../matmul/README.md#phase-3d--rag-shape-cached-matmul--fused-top-k)): three calls — `loadMatrixGpu` for corpus (once at boot), `loadMatrixGpu` for query (per request), `searchHandle(hA, hB, idxU32, scoresF32)`. End-to-end demo at [examples/rag-demo/search.js](../examples/rag-demo/search.js).
+`searchHandle` API surface (see [examples/matmul/README.md](../examples/matmul/README.md#phase-3d--rag-shape-cached-matmul--fused-top-k)): three calls — `loadMatrixGpu` for corpus (once at boot), `loadMatrixGpu` for query (per request), `searchHandle(hA, hB, idxU32, scoresF32)`. End-to-end demo at [examples/rag-demo/search.js](../examples/rag-demo/search.js).

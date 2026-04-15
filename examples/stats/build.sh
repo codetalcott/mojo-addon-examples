@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 NAPI_SRC="$ROOT_DIR/node_modules/napi-mojo/src"
 
 mkdir -p "$SCRIPT_DIR/build"

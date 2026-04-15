@@ -50,7 +50,7 @@ echo ""                                      >> "$OUTFILE"
 # --- Locate or clone repo ------------------------------------------------
 if [ -d "$HOME/mojo-addon-examples/.git" ]; then
     cd "$HOME/mojo-addon-examples"
-elif [ -d "./.git" ] && [ -f "./matmul/addon_cached.mojo" ]; then
+elif [ -d "./.git" ] && [ -f "./examples/matmul/addon_cached.mojo" ]; then
     :  # Already in repo
 else
     cd "$HOME"
@@ -76,22 +76,22 @@ npm install >/dev/null
 
 # --- Build CPU-only matmul.node (oracle for CPU row) ---------------------
 echo "=== BUILD: matmul.node (oracle) ==="   >> "$OUTFILE"
-pixi run bash matmul/build.sh                2>&1 | tail -3 >> "$OUTFILE"
+pixi run bash examples/matmul/build.sh                2>&1 | tail -3 >> "$OUTFILE"
 
 # --- Build cached matmul with tensor cores ------------------------------
 echo ""                                      >> "$OUTFILE"
 echo "=== BUILD: matmul_cached.node (3c.2) ==="  >> "$OUTFILE"
-pixi run bash matmul/build_cached.sh         2>&1 | tail -3 >> "$OUTFILE"
+pixi run bash examples/matmul/build_cached.sh         2>&1 | tail -3 >> "$OUTFILE"
 
 # --- Regression test ----------------------------------------------------
 echo ""                                      >> "$OUTFILE"
 echo "=== REGRESSION: matmul test_cached (3c.2) ==="  >> "$OUTFILE"
-node matmul/test_cached.js                   >> "$OUTFILE" 2>&1
+node examples/matmul/test_cached.js                   >> "$OUTFILE" 2>&1
 
 # --- 3-path benchmark ---------------------------------------------------
 echo ""                                      >> "$OUTFILE"
 echo "=== BENCH: matmul_cached (3c.2) ==="   >> "$OUTFILE"
-node matmul/matmul_cached.js                 >> "$OUTFILE" 2>&1
+node examples/matmul/matmul_cached.js                 >> "$OUTFILE" 2>&1
 
 echo ""                                      >> "$OUTFILE"
 echo "=== DONE ==="                          >> "$OUTFILE"

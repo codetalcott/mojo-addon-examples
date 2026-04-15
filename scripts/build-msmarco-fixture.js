@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Build the MS-MARCO real-embedding fixture used by matmul/matmul_rag.js
+// Build the MS-MARCO real-embedding fixture used by examples/matmul/matmul_rag.js
 // when invoked with --fixture=msmarco-10k.
 //
 // Pulls the first N passages and Q queries from BeIR's MS-MARCO via the

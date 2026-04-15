@@ -58,7 +58,7 @@ echo ""                                       >> "$OUTFILE"
 # --- Locate or clone repo ------------------------------------------------
 if [ -d "$HOME/mojo-addon-examples/.git" ]; then
     cd "$HOME/mojo-addon-examples"
-elif [ -d "./.git" ] && [ -f "./matmul/addon_cached.mojo" ]; then
+elif [ -d "./.git" ] && [ -f "./examples/matmul/addon_cached.mojo" ]; then
     :  # Already in repo
 else
     cd "$HOME"
@@ -84,17 +84,17 @@ npm install >/dev/null
 
 # --- Build cached matmul (tensor cores via linalg.matmul) ----------------
 echo "=== BUILD: matmul_cached.node ==="      >> "$OUTFILE"
-pixi run bash matmul/build_cached.sh          2>&1 | tail -3 >> "$OUTFILE"
+pixi run bash examples/matmul/build_cached.sh          2>&1 | tail -3 >> "$OUTFILE"
 
 # --- Regression: test_cached.js (includes searchHandle cases) ------------
 echo ""                                       >> "$OUTFILE"
 echo "=== REGRESSION: matmul test_cached ===" >> "$OUTFILE"
-node matmul/test_cached.js                    >> "$OUTFILE" 2>&1
+node examples/matmul/test_cached.js                    >> "$OUTFILE" 2>&1
 
 # --- RAG-shape bench: 100k + 1M corpora, concurrency=100, all baselines --
 echo ""                                       >> "$OUTFILE"
 echo "=== BENCH: matmul_rag (3d, --full) ===" >> "$OUTFILE"
-node matmul/matmul_rag.js --full --concurrency=100  >> "$OUTFILE" 2>&1
+node examples/matmul/matmul_rag.js --full --concurrency=100  >> "$OUTFILE" 2>&1
 
 # --- Real-embedding fixture bench ----------------------------------------
 # Skipped by default: fetches ~10k MS-MARCO rows from HF (rate-limited, ~5 min)
@@ -121,7 +121,7 @@ fi
 if [ "$RUN_FIXTURE" = "1" ]; then
     echo ""                                                         >> "$OUTFILE"
     echo "=== BENCH: matmul_rag (msmarco-10k real embeddings) ==="  >> "$OUTFILE"
-    node matmul/matmul_rag.js --fixture=msmarco-10k --concurrency=100  >> "$OUTFILE" 2>&1
+    node examples/matmul/matmul_rag.js --fixture=msmarco-10k --concurrency=100  >> "$OUTFILE" 2>&1
 fi
 
 echo ""                                       >> "$OUTFILE"

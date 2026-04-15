@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Build Phase 3b.1 cached image addon: persistent device buffer + grayscale
+# Build simd-search cached addon (Phase 3a.1 prototype): persistent device
+# buffer variant, compiled as search_cached.node alongside the existing
+# search.node so both can be imported from one benchmark script.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 NAPI_SRC="$ROOT_DIR/node_modules/napi-mojo/src"
 
 mkdir -p "$SCRIPT_DIR/build"
@@ -20,9 +22,9 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
 fi
 
 # GPU target: Darwin arm64 → metal:4, Linux x86_64 → sm_90 (H100/H200).
-# Override with IMAGE_ACCEL="" or IMAGE_ACCEL="--target-accelerator sm_80" etc.
-ACCEL_FLAG="${IMAGE_ACCEL-}"
-if [ -z "${IMAGE_ACCEL+x}" ]; then
+# Override with SEARCH_CACHED_ACCEL="" or SEARCH_CACHED_ACCEL="--target-accelerator sm_80" etc.
+ACCEL_FLAG="${SEARCH_CACHED_ACCEL-}"
+if [ -z "${SEARCH_CACHED_ACCEL+x}" ]; then
     if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         ACCEL_FLAG="--target-accelerator metal:4"
     elif [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
@@ -31,8 +33,8 @@ if [ -z "${IMAGE_ACCEL+x}" ]; then
 fi
 
 mojo build --emit shared-lib ${MCPU_FLAG} ${ACCEL_FLAG} -I "$NAPI_SRC" \
-    "$SCRIPT_DIR/addon_cached.mojo" -o "$SCRIPT_DIR/build/image_cached.${LIB_EXT}"
+    "$SCRIPT_DIR/addon_cached.mojo" -o "$SCRIPT_DIR/build/search_cached.${LIB_EXT}"
 
-mv "$SCRIPT_DIR/build/image_cached.${LIB_EXT}" "$SCRIPT_DIR/build/image_cached.node"
+mv "$SCRIPT_DIR/build/search_cached.${LIB_EXT}" "$SCRIPT_DIR/build/search_cached.node"
 
-echo "Build complete: image/build/image_cached.node"
+echo "Build complete: simd-search/build/search_cached.node"
