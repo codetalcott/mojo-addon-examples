@@ -1,0 +1,46 @@
+{
+  "name": "@qkstat/rag",
+  "version": "0.1.0-pre",
+  "description": "GPU-accelerated exact-retrieval RAG primitives for Node.js — cached matmul + fused top-k, written in Mojo.",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "lib/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": { "node": ">=22.12" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/codetalcott/mojo-addon-examples.git",
+    "directory": "packages/rag"
+  },
+  "homepage": "https://qkstat.com",
+  "bugs": "https://github.com/codetalcott/mojo-addon-examples/issues",
+  "keywords": [
+    "rag",
+    "vector-search",
+    "semantic-search",
+    "gpu",
+    "cuda",
+    "metal",
+    "mojo",
+    "napi"
+  ],
+  "license": "MIT",
+  "optionalDependencies": {
+    "@qkstat/rag-darwin-arm64": "0.1.0-pre",
+    "@qkstat/rag-linux-x64": "0.1.0-pre"
+  },
+  "scripts": {
+    "build": "bash build.sh",
+    "bundle": "bash scripts/bundle-libs.sh",
+    "test": "jest tests/"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

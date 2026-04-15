@@ -1,0 +1,22 @@
+{
+  "name": "@qkstat/rag-darwin-arm64",
+  "version": "0.1.0-pre",
+  "description": "Prebuilt @qkstat/rag binary for macOS arm64 (Apple Silicon / Metal).",
+  "main": "rag.node",
+  "files": [
+    "rag.node",
+    "README.md"
+  ],
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "engines": { "node": ">=22.12" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/codetalcott/mojo-addon-examples.git",
+    "directory": "packages/rag/npm/darwin-arm64"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

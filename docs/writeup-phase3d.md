@@ -8,9 +8,9 @@
 
 A JavaScript function call. One query. 10,000 MS-MARCO passages. Exact cosine-similarity top-10.
 
-**0.06 ms.** Recall: 1.0.
+**0.06 ms.** Recall: 1.0. 19,000 queries per second from a single process, p99 = 0.09 ms.
 
-That's a Node.js native addon calling a cached GPU matmul written in Mojo, running on an H100. 19,000 queries per second from a single process, p99 = 0.09 ms, no Python runtime, no hosted vector DB, no network hop. The corpus lives on the GPU; each query ships ~1.5 KB up, gets a `[1, N]` score matrix computed in registers, and the top-k reduction fuses into the same kernel so the D2H transfer is 40 bytes instead of 40 KB.
+That's a Node.js native addon — a `.node` file built from ~300 lines of Mojo — calling a cached GPU matmul on an H100. The corpus lives on the GPU; each query ships ~1.5 KB up, gets a `[1, N]` score matrix computed in registers, and the top-k reduction fuses into the same kernel so the D2H transfer is 40 bytes instead of 40 KB. No hosted vector DB, no network hop, no approximate-nearest-neighbor tradeoff. The whole retrieval path is one JS-to-native call and one GPU kernel launch.
 
 This post is about how that number got honest, what it doesn't mean, and the ~80 lines of code you'd actually run.
 
@@ -60,7 +60,7 @@ Everything in this post is reproducible with:
 node scripts/build-msmarco-fixture.js              # ~10 min, one-time
 bash scripts/runpod-bench-3d.sh                    # H100 on RunPod, ~20 min, ~$1
 # or locally:
-node matmul/matmul_rag.js --fixture=msmarco-10k
+node examples/matmul/matmul_rag.js --fixture=msmarco-10k
 ```
 
 Raw captures are in the repo at [`docs/bench-rag-3d-h100-msmarco.txt`](bench-rag-3d-h100-msmarco.txt) and [`docs/bench-rag-3d-msmarco-m4.txt`](bench-rag-3d-msmarco-m4.txt).
@@ -69,35 +69,32 @@ Raw captures are in the repo at [`docs/bench-rag-3d-h100-msmarco.txt`](bench-rag
 
 ## The 80-line demo
 
-The interesting code is in [`examples/rag-demo/search.js`](../examples/rag-demo/search.js). Here's the whole public surface:
+The interesting code is in [`examples/rag-demo/search.js`](../examples/rag-demo/search.js). The primitives live in [`@qkstat/rag`](../packages/rag/) — four GPU exports plus a thin `GpuIndex` helper. Here's the whole public surface:
 
 ```javascript
-const cached = require('./matmul/build/matmul_cached.node');
+const { GpuIndex } = require('@qkstat/rag');
 
-class GpuIndex {
-  constructor({ docs, embeddings, dim }) {
-    this.docs = docs;
-    this.dim = dim;
-    this.n = docs.length;
-    // Transpose [N, dim] → [dim, N] so query @ corpus gives [1, N] scores.
-    const corpusT = new Float32Array(dim * this.n);
-    for (let i = 0; i < this.n; i++) {
-      for (let j = 0; j < dim; j++) corpusT[j * this.n + i] = embeddings[i * dim + j];
-    }
-    this.hCorpus = cached.loadMatrixGpu(corpusT, dim, this.n);
-  }
+// embeddings is a Float32Array of length docs.length * dim, row-major.
+const index = new GpuIndex({ docs, embeddings, dim: 384 });
 
-  search(queryEmbedding, k) {
-    const hQuery = cached.loadMatrixGpu(queryEmbedding, 1, this.dim);
-    const idx = new Uint32Array(k);
-    const scores = new Float32Array(k);
-    cached.searchHandle(hQuery, this.hCorpus, idx, scores);
-    cached.releaseMatrixGpu(hQuery);
-    return Array.from(idx, (i, r) => ({ doc: this.docs[i], score: scores[r], index: i }));
-  }
+// Query is a Float32Array of length dim.
+const top10 = index.search(query, 10);
+// [{ doc, score, index }, ...] sorted descending by score
 
-  close() { cached.releaseMatrixGpu(this.hCorpus); }
-}
+index.close();
+```
+
+Under the hood, `GpuIndex` is thirty lines wrapping four primitives — [packages/rag/lib/GpuIndex.js](../packages/rag/lib/GpuIndex.js). Drop down to them directly if you want the raw handles:
+
+```javascript
+const { loadMatrixGpu, matmulHandle, searchHandle, releaseMatrixGpu } = require('@qkstat/rag');
+
+const hCorpus = loadMatrixGpu(corpusColMajor, dim, N);     // one-time H2D
+const hQuery = loadMatrixGpu(queryRowMajor, B, dim);
+const idx = new Uint32Array(B * k);
+const scores = new Float32Array(B * k);
+searchHandle(hQuery, hCorpus, idx, scores);                // fused matmul + top-k
+releaseMatrixGpu(hQuery);
 ```
 
 That's the whole API. `loadMatrixGpu` is a one-time H2D copy; the returned handle is a persistent GPU buffer you reuse across queries. `searchHandle` runs the matmul + top-k on the GPU and writes the top-k indices and scores back to JS-owned `Uint32Array` / `Float32Array` — no per-query allocation on the hot path, no JSON boundary, no IPC.
@@ -118,11 +115,11 @@ What's happening on the GPU is boring in a good way. It's `linalg.matmul` — Mo
 
 ## Who this is for
 
-If you're building a RAG app in Node.js, have a corpus that fits on one GPU (call it < 10M vectors × 768 dim = ~30 GB), and a workload that can tolerate owning an H100 (or sharing one), the exact-retrieval path is now on the table. No Python bridge, no vector DB licence, no cross-region network hop. The corpus lives in HBM3, the query is a ~1.5 KB H2D, and the answer is back in 60 µs with perfect recall.
+If you're building a RAG app in Node.js, have a corpus that fits on one GPU (call it < 10M vectors × 768 dim = ~30 GB), and a workload that can tolerate owning an H100 (or sharing one), the exact-retrieval path is now on the table. No vector DB licence, no cross-region network hop, no approximate-recall tradeoff. The corpus lives in HBM3, the query is a ~1.5 KB H2D, and the answer is back in 60 µs with perfect recall.
 
 The "fits on one GPU" line is the constraint that matters. At `[1, 768] × 1M` the H100 bench shows sub-2 ms single-query at recall=1.0 — that's the end of the paved road for now. Past that you need to shard, and this repo doesn't.
 
-If you're building in Python, none of this applies; you already have FAISS, which does all of this and more. The point here is that **the same capability is now reachable from Node**, with ~300 lines of Mojo + napi glue, built from a public stdlib matmul and a public N-API binding pattern.
+One honest note on install footprint: building from source pulls in the Mojo/MAX SDK via pixi (~2 GB), similar in size to a torch+CUDA setup. The runtime artifact is a single ~10 MB `.node` file — prebuilt binaries per platform are the clean deploy story, but they're not yet published. If you want to use this today, plan for a ~5 min source build on first install. We'll have prebuilts before you'd reasonably productionize it.
 
 ---
 
@@ -138,6 +135,14 @@ cat ~/bench-rag-3d.txt
 
 That script installs pixi + Node, builds the cached-matmul addon, runs the regression, builds the MS-MARCO fixture, and runs the whole bench suite (synthetic + real embeddings, single-query + batch-64 + batch-256, 100k + 1M corpus). Terminate the pod when it's done. Under a dollar.
 
-Code: [github.com/codetalcott/mojo-addon-examples](https://github.com/codetalcott/mojo-addon-examples).
+If you just want the GPU primitives in your own Node app (no bench suite, no MS-MARCO), this is now three lines:
 
-Feedback wanted. If the right next move is a standalone `@org/node-rag` package, that's a conversation I'd like to have.
+```js
+const { loadMatrixGpu, searchHandle, releaseMatrixGpu } = require('@qkstat/rag');
+const hCorpus = loadMatrixGpu(corpusFloat32ColMajor, dim, N);
+searchHandle(loadMatrixGpu(queryFloat32, 1, dim), hCorpus, topKIdx, topKScores);
+```
+
+Code: [github.com/codetalcott/mojo-addon-examples](https://github.com/codetalcott/mojo-addon-examples) · the glue framework at [github.com/codetalcott/napi-mojo](https://github.com/codetalcott/napi-mojo).
+
+Feedback welcome — this is the first release of `@qkstat/rag`, and the shape of the API is still open to pull from what you actually want to build with it.

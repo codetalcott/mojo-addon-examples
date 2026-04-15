@@ -1,0 +1,23 @@
+{
+  "name": "@qkstat/rag-linux-x64",
+  "version": "0.1.0-pre",
+  "description": "Prebuilt @qkstat/rag binary for Linux x86_64 (NVIDIA GPU, compute capability >= 8.0 via driver PTX JIT).",
+  "main": "rag.node",
+  "files": [
+    "rag.node",
+    "gpu-libs/",
+    "README.md"
+  ],
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "engines": { "node": ">=22.12" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/codetalcott/mojo-addon-examples.git",
+    "directory": "packages/rag/npm/linux-x64"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

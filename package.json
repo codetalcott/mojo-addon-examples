@@ -18,6 +18,7 @@
     "test": "node examples/matmul/test.js && node examples/simd-search/test.js && node examples/stats/test.js && node examples/image/test.js && node examples/wyhash/test.js"
   },
   "dependencies": {
+    "@qkstat/rag": "file:packages/rag",
     "hnswlib-node": "^3.0.0",
     "napi-mojo": "^0.3.0",
     "onnxruntime-node": "^1.24.3"
