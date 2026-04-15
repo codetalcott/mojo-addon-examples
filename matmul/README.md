@@ -163,7 +163,28 @@ When the question is "top-k semantic search" rather than "matmul backend," the r
 
 At larger batches (B=64, 256), GPU exact pulls further ahead: at k=10 recall 0.65–0.70, HNSW ef=2000 runs **7× slower** than GPU exact.
 
-**Important caveat on the HNSW numbers:** the bench uses L2-normalized random vectors, which are worst-case for graph-based ANN — concentration of measure in high dim makes "top-10 nearest" a near-tie among thousands of candidates, and HNSW's graph can't discriminate. On real sentence-transformer embeddings (clustered, lower effective dimensionality), HNSW at `ef=100` routinely hits recall > 0.95. The takeaway: the exact path's value is recall, not raw latency; users who can tolerate approximate results should still benchmark HNSW on their actual data.
+**Important caveat on the HNSW numbers above:** the bench uses L2-normalized random vectors, which are worst-case for graph-based ANN — concentration of measure in high dim makes "top-10 nearest" a near-tie among thousands of candidates, and HNSW's graph can't discriminate. On real sentence-transformer embeddings (clustered, lower effective dimensionality), HNSW recall climbs sharply — often to 1.00 — at the same `ef`. The table below shows the shift.
+
+#### Real embeddings — MS-MARCO + MiniLM-L6-v2 (M4 Metal)
+
+Build the fixture once (~10 min, fetches 10k passages + 200 queries from BeIR's MS-MARCO via the HF datasets-server API, embeds with `Xenova/all-MiniLM-L6-v2`, writes `.bin` — see [`examples/rag-demo/fixtures/README.md`](../examples/rag-demo/fixtures/README.md)):
+
+```bash
+node scripts/build-msmarco-fixture.js
+node matmul/matmul_rag.js --fixture=msmarco-10k
+```
+
+`[1, 384] × [384, 10k]` at k=10, real MS-MARCO passage embeddings:
+
+| Baseline | Latency | Recall@10 | Notes |
+| --- | ---: | ---: | --- |
+| HNSW `ef=100` | 0.26 ms | 1.00 | HNSW wins single-query on real data at this N |
+| HNSW `ef=500` | 0.79 ms | 1.00 | |
+| HNSW `ef=2000` | 2.05 ms | 1.00 | |
+| ORT CPU | 1.32 ms | 1.00 | Still the best CPU baseline at small shapes on M4 |
+| **GPU `searchHandle`** | **3.59 ms** | **1.00** | Exact; M4 Metal doesn't beat ORT for this shape |
+
+The recall shift is the headline: at ef=100, synthetic N=100k recall was 0.10; real N=10k recall is 1.00. Three caveats on the latency column: (1) N=10k is small enough that HNSW's log-N advantage dominates — at N=1M real embeddings the GPU gap narrows; (2) M4 Metal is the slowest hardware in the table — the H100 row above hits sub-1 ms at 100× the corpus size; (3) at batch-64 the order flips: GPU exact is 1.3–11× faster than HNSW at ef=100–2000 (GPU amortizes the fixed kernel cost across the batch, HNSW pays per-query). So the GPU path's value proposition is **batched workloads + real-world scale**, not beating ANN on single-query small corpora.
 
 The ORT baseline uses a dynamic-shape MatMul graph at [matmul/fixtures/matmul_dyn.onnx](fixtures/matmul_dyn.onnx) (118 bytes, regenerable via the one-liner in the file header).
 

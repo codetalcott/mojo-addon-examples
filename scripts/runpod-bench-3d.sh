@@ -12,6 +12,12 @@
 #
 #   cd ~/mojo-addon-examples && bash scripts/runpod-bench-3d.sh
 #
+# Add FIXTURE=1 to also build + run the real-embedding (MS-MARCO + MiniLM)
+# bench. Pre-staged .bin files under examples/rag-demo/fixtures/ auto-enable
+# it without building:
+#
+#   FIXTURE=1 bash scripts/runpod-bench-3d.sh
+#
 # Or as a single curl (public repo):
 #
 #   curl -fsSL https://raw.githubusercontent.com/codetalcott/mojo-addon-examples/main/scripts/runpod-bench-3d.sh | bash
@@ -89,6 +95,34 @@ node matmul/test_cached.js                    >> "$OUTFILE" 2>&1
 echo ""                                       >> "$OUTFILE"
 echo "=== BENCH: matmul_rag (3d, --full) ===" >> "$OUTFILE"
 node matmul/matmul_rag.js --full --concurrency=100  >> "$OUTFILE" 2>&1
+
+# --- Real-embedding fixture bench ----------------------------------------
+# Skipped by default: fetches ~10k MS-MARCO rows from HF (rate-limited, ~5 min)
+# and CPU-embeds them with Xenova/all-MiniLM-L6-v2 (~5 min) before running the
+# bench at [1, 384] × [384, 10k]. Enable with FIXTURE=1 in the environment, or
+# pre-stage the .bin files under examples/rag-demo/fixtures/ (e.g. scp from
+# the machine where you ran build-msmarco-fixture.js) — if both files are
+# already present the script skips the build and just runs the bench.
+CORPUS_BIN="examples/rag-demo/fixtures/msmarco-10k-corpus.bin"
+QUERIES_BIN="examples/rag-demo/fixtures/msmarco-10k-queries.bin"
+if [ -f "$CORPUS_BIN" ] && [ -f "$QUERIES_BIN" ]; then
+    RUN_FIXTURE=1
+elif [ "${FIXTURE:-0}" = "1" ]; then
+    RUN_FIXTURE=1
+    echo ""                                                         >> "$OUTFILE"
+    echo "=== BUILD: msmarco-10k fixture ==="                        >> "$OUTFILE"
+    node scripts/build-msmarco-fixture.js                            >> "$OUTFILE" 2>&1
+else
+    RUN_FIXTURE=0
+    echo ""                                                         >> "$OUTFILE"
+    echo "=== SKIP: msmarco-10k fixture (set FIXTURE=1 to build) ==" >> "$OUTFILE"
+fi
+
+if [ "$RUN_FIXTURE" = "1" ]; then
+    echo ""                                                         >> "$OUTFILE"
+    echo "=== BENCH: matmul_rag (msmarco-10k real embeddings) ==="  >> "$OUTFILE"
+    node matmul/matmul_rag.js --fixture=msmarco-10k --concurrency=100  >> "$OUTFILE" 2>&1
+fi
 
 echo ""                                       >> "$OUTFILE"
 echo "=== nvidia-smi FINAL ==="               >> "$OUTFILE"

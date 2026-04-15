@@ -14,17 +14,24 @@
 // Flags:
 //   --full         also run 1M-corpus shapes (multi-GB device memory)
 //   --concurrency=N  run N concurrent matmulHandle calls (sync throughput test)
+//   --fixture=NAME load a real-embedding corpus from examples/rag-demo/fixtures
+//                  (e.g. --fixture=msmarco-10k). Replaces SHAPES with the
+//                  fixture's d×N. Build the fixture with:
+//                  node scripts/build-msmarco-fixture.js
 //
 // Build:  pixi run bash matmul/build_cached.sh
 // Run:    node matmul/matmul_rag.js
 
 const path = require('path');
+const fs = require('fs');
 
 const args = process.argv.slice(2);
 const FULL = args.includes('--full');
 const SKIP_ORT = args.includes('--no-ort');
 const concurrencyArg = args.find((a) => a.startsWith('--concurrency='));
 const CONCURRENCY = concurrencyArg ? parseInt(concurrencyArg.split('=')[1], 10) : 0;
+const fixtureArg = args.find((a) => a.startsWith('--fixture='));
+const FIXTURE = fixtureArg ? fixtureArg.split('=')[1] : null;
 
 let cached = null;
 try {
@@ -65,12 +72,18 @@ if (!SKIP_HNSW) {
 // allocation churn). In practice only the primary RAG shape is worth the cost
 // — the product comparison's recall story doesn't change across shapes.
 const HNSW_SHAPES = new Set(['768x100000']);
+// Fixture shapes opt in to HNSW comparison too — that's the whole point of
+// running with real embeddings.
 // Cache the corpus `b` matrix by (d, N) so batch-64/256 at d=768 reuse the
 // same underlying data as the single-query case. This is both a perf optimization
 // (one hnswlib build across shapes) AND a correctness requirement for recall
 // measurement — the hnswlib index and searchHandle must score the same docs.
 const corpusCache = new Map();
 const hnswIndexCache = new Map();
+// When loaded from a fixture, real query vectors replace makeMatrix(B, d).
+// Keyed by d so multiple fixtures could coexist; values are Float32Array of
+// length Q*d, row-major. benchShape cycles rows if B > Q.
+const queriesByDim = new Map();
 
 // --- JS baseline — used only where flops budget allows ----------------------
 
@@ -92,6 +105,60 @@ function makeMatrix(rows, cols) {
   const m = new Float32Array(rows * cols);
   for (let i = 0; i < m.length; i++) m[i] = Math.random() * 2 - 1;
   return m;
+}
+
+// Read a fixture .bin written by scripts/build-msmarco-fixture.js. Returns
+// { d, n, vectors } where vectors is a Float32Array of length n*d, row-major
+// (one row per vector).
+function readFixtureBin(file) {
+  const buf = fs.readFileSync(file);
+  if (buf.length < 16 || buf.slice(0, 4).toString('ascii') !== 'MMR1') {
+    throw new Error(`bad fixture magic in ${file} (rebuild with scripts/build-msmarco-fixture.js)`);
+  }
+  const dtype = buf.readUInt32LE(4);
+  if (dtype !== 0) throw new Error(`unsupported fixture dtype=${dtype} in ${file} (only float32 supported)`);
+  const d = buf.readUInt32LE(8);
+  const n = buf.readUInt32LE(12);
+  const expected = 16 + n * d * 4;
+  if (buf.length !== expected) {
+    throw new Error(`fixture ${file} size mismatch: header says ${expected} bytes, got ${buf.length}`);
+  }
+  // Slice + copy into a fresh ArrayBuffer so byte alignment is guaranteed
+  // and the view doesn't alias the Buffer pool.
+  const vectors = new Float32Array(n * d);
+  Buffer.from(vectors.buffer).set(buf.slice(16));
+  return { d, n, vectors };
+}
+
+// Load a named fixture from examples/rag-demo/fixtures. Returns the corpus
+// in column-major [d, N] layout (matching what `b = makeMatrix(d, N)` +
+// l2NormalizeCols produces) and queries in row-major [Q, d] layout (matching
+// `a = makeMatrix(B, d)`).
+function loadFixture(name) {
+  const dir = path.resolve(__dirname, '..', 'examples/rag-demo/fixtures');
+  const corpusPath = path.join(dir, `${name}-corpus.bin`);
+  const queriesPath = path.join(dir, `${name}-queries.bin`);
+  if (!fs.existsSync(corpusPath) || !fs.existsSync(queriesPath)) {
+    throw new Error(
+      `fixture '${name}' not found in ${dir}\n` +
+        `  build it with: node scripts/build-msmarco-fixture.js`,
+    );
+  }
+  const corpus = readFixtureBin(corpusPath);
+  const queries = readFixtureBin(queriesPath);
+  if (corpus.d !== queries.d) {
+    throw new Error(`fixture ${name}: corpus d=${corpus.d} but queries d=${queries.d}`);
+  }
+  // Transpose corpus from row-major [N, d] to column-major [d, N] (one column
+  // per document). Defensive re-normalize in case a hand-built fixture skipped it.
+  const d = corpus.d, N = corpus.n;
+  const colMajor = new Float32Array(d * N);
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < d; i++) colMajor[i * N + j] = corpus.vectors[j * d + i];
+  }
+  l2NormalizeCols(colMajor, d, N);
+  l2NormalizeRows(queries.vectors, queries.n, d);
+  return { d, N, Q: queries.n, corpusColMajor: colMajor, queriesRowMajor: queries.vectors };
 }
 
 // Row-normalize an [rows, cols] row-major matrix in place. Production RAG
@@ -153,7 +220,9 @@ const FULL_SHAPES = [
   { B: 64,  d: 768,  N: 1_000_000, iters: 5,  label: 'batch-64 × 1M corpus' },
 ];
 
-const SHAPES = FULL ? [...BASE_SHAPES, ...FULL_SHAPES] : BASE_SHAPES;
+// Shapes for fixture mode are derived at runtime from the loaded fixture's
+// (d, N). See `main()` — SHAPES is replaced when --fixture is set.
+let SHAPES = FULL ? [...BASE_SHAPES, ...FULL_SHAPES] : BASE_SHAPES;
 
 // JS baseline cost budget: skip if > ~2 seconds estimated.
 // Single-threaded Float32 triple-loop on modern CPU ≈ 150M flops/sec.
@@ -211,8 +280,19 @@ async function benchShape({ B, d, N, iters, label }) {
   console.log(`  flops: ${(flops / 1e9).toFixed(2)} GFLOP/call`);
   console.log(`  device B: ${(bytesB / 1e6).toFixed(0)}MB, per-call dst: ${(bytesDst / 1e6).toFixed(1)}MB`);
 
-  const a = makeMatrix(B, d);
-  l2NormalizeRows(a, B, d);
+  const fixtureQ = queriesByDim.get(d);
+  let a;
+  if (fixtureQ) {
+    const Q = fixtureQ.length / d;
+    a = new Float32Array(B * d);
+    for (let r = 0; r < B; r++) {
+      const src = (r % Q) * d;
+      a.set(fixtureQ.subarray(src, src + d), r * d);
+    }
+  } else {
+    a = makeMatrix(B, d);
+    l2NormalizeRows(a, B, d);
+  }
   // Corpus is keyed by (d, N) so hnswlib build + index cache are valid across
   // shapes that share a corpus.
   const corpusKey = `${d}x${N}`;
@@ -389,6 +469,18 @@ async function main() {
   console.log('--- matmul RAG-shape benchmark ---\n');
   console.log(`  mode: ${FULL ? 'full (includes 1M-corpus shapes)' : 'base (100K-corpus only; use --full for 1M)'}`);
   if (CONCURRENCY > 0) console.log(`  concurrency: ${CONCURRENCY} sync calls per batch`);
+
+  if (FIXTURE) {
+    const fx = loadFixture(FIXTURE);
+    console.log(`  fixture: ${FIXTURE} (real embeddings, d=${fx.d}, N=${fx.N}, queries=${fx.Q})`);
+    corpusCache.set(`${fx.d}x${fx.N}`, fx.corpusColMajor);
+    queriesByDim.set(fx.d, fx.queriesRowMajor);
+    HNSW_SHAPES.add(`${fx.d}x${fx.N}`);
+    SHAPES = [
+      { B: 1,  d: fx.d, N: fx.N, iters: 100, label: `${FIXTURE} single query (d=${fx.d}, N=${fx.N})` },
+      { B: 64, d: fx.d, N: fx.N, iters: 20,  label: `${FIXTURE} batch-64 (d=${fx.d}, N=${fx.N})` },
+    ];
+  }
 
   if (ort) {
     try {

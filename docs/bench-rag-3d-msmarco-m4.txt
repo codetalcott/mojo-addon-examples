@@ -1,0 +1,39 @@
+--- matmul RAG-shape benchmark ---
+
+  mode: base (100K-corpus only; use --full for 1M)
+  fixture: msmarco-10k (real embeddings, d=384, N=10000, queries=200)
+  ORT baseline: onnxruntime-node 1.24.3 (CPU)
+  HNSW baseline: hnswlib-node (approximate, measured at k=10 with recall)
+
+=== Correctness (rectangular 4×64 × 64×1000) ===
+  mismatches: 0/4000 (0.000%, rtol=1e-1)
+  PASS
+
+=== msmarco-10k single query (d=384, N=10000) ===
+  shape: [1, 384] × [384, 10000]
+  flops: 0.01 GFLOP/call
+  device B: 15MB, per-call dst: 0.0MB
+  JS loop:      4.45ms/op  1.73 GFLOP/s  (baseline)
+  ORT CPU:      1.32ms/op  5.83 GFLOP/s  (onnxruntime-node MatMul)
+  GPU cached:   2.55ms/op  3.01 GFLOP/s  2× vs JS, 0.5× vs ORT
+                (loadMatrixGpu: 7.0ms one-time)
+  GPU search:   3.59ms/op  (searchHandle top-10, exact)
+  hnswlib HNSW: building index for N=10000, d=384... done (3.3s)
+                ef= 100: 0.26ms/op  recall@10=1.00  (HNSW 13.8× faster)
+                ef= 500: 0.79ms/op  recall@10=1.00  (HNSW 4.6× faster)
+                ef=2000: 2.05ms/op  recall@10=1.00  (HNSW 1.7× faster)
+
+=== msmarco-10k batch-64 (d=384, N=10000) ===
+  shape: [64, 384] × [384, 10000]
+  flops: 0.49 GFLOP/call
+  device B: 15MB, per-call dst: 2.6MB
+  JS loop:      skipped (est 3.3s > 2s budget)
+  ORT CPU:      2.26ms/op  217.48 GFLOP/s  (onnxruntime-node MatMul)
+  GPU cached:   8.39ms/op  58.56 GFLOP/s  0.3× vs ORT
+                (loadMatrixGpu: 5.9ms one-time)
+  GPU search:   12.00ms/op  (searchHandle top-10, exact)
+  hnswlib HNSW: reusing cached index for N=10000, d=384
+                ef= 100: 15.91ms/op  recall@10=1.00  (GPU 1.3× faster)
+                ef= 500: 58.07ms/op  recall@10=1.00  (GPU 4.8× faster)
+                ef=2000: 132.07ms/op  recall@10=1.00  (GPU 11.0× faster)
+
