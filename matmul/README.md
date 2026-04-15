@@ -184,7 +184,25 @@ node matmul/matmul_rag.js --fixture=msmarco-10k
 | ORT CPU | 1.32 ms | 1.00 | Still the best CPU baseline at small shapes on M4 |
 | **GPU `searchHandle`** | **3.59 ms** | **1.00** | Exact; M4 Metal doesn't beat ORT for this shape |
 
-The recall shift is the headline: at ef=100, synthetic N=100k recall was 0.10; real N=10k recall is 1.00. Three caveats on the latency column: (1) N=10k is small enough that HNSW's log-N advantage dominates — at N=1M real embeddings the GPU gap narrows; (2) M4 Metal is the slowest hardware in the table — the H100 row above hits sub-1 ms at 100× the corpus size; (3) at batch-64 the order flips: GPU exact is 1.3–11× faster than HNSW at ef=100–2000 (GPU amortizes the fixed kernel cost across the batch, HNSW pays per-query). So the GPU path's value proposition is **batched workloads + real-world scale**, not beating ANN on single-query small corpora.
+The recall shift is the headline: at ef=100, synthetic N=100k recall was 0.10; real N=10k recall is 1.00. On M4 at this shape HNSW wins the latency column — N=10k is small enough that HNSW's log-N advantage dominates, and M4's Metal dispatch overhead is a bigger fraction of the query cost than on H100 (see next table).
+
+#### Real embeddings — MS-MARCO + MiniLM-L6-v2 (H100 80GB HBM3)
+
+Same fixture, same shapes, run via [`scripts/runpod-bench-3d.sh`](../scripts/runpod-bench-3d.sh) with pre-staged `.bin` files. Raw capture: [docs/bench-rag-3d-h100-msmarco.txt](../docs/bench-rag-3d-h100-msmarco.txt).
+
+`[1, 384] × [384, 10k]` at k=10:
+
+| Baseline | Latency | Recall@10 | Notes |
+| --- | ---: | ---: | --- |
+| HNSW `ef=100` | 0.20 ms | 1.00 | |
+| HNSW `ef=500` | 0.68 ms | 1.00 | |
+| HNSW `ef=2000` | 1.79 ms | 1.00 | |
+| ORT CPU | 0.13 ms | 1.00 | CPU MatMul is very fast at d=384 |
+| **GPU `searchHandle`** | **0.06 ms** | **1.00** | 3.3–29× faster than HNSW; fused matmul + top-k |
+
+Burst of 100 sync calls: p50=0.05 ms, p95=0.05 ms, p99=0.09 ms, **~19k QPS**, p99/p50=1.7× (no small-shape tail spike at this shape). At batch-64 GPU pulls further ahead vs HNSW (9–23× faster at ef=100–2000), though the small-shape p99 tail re-appears (p50=0.31 ms, p99=77.9 ms) — same driver/stream hiccup the synthetic bench flagged.
+
+The order is fully inverted vs M4: on H100 the GPU path beats HNSW *and* ORT on latency, with recall=1.00. This is the "defensible product story" the plan called for — sub-100 µs exact semantic search from Node, with full recall, at 19k QPS single-query.
 
 The ORT baseline uses a dynamic-shape MatMul graph at [matmul/fixtures/matmul_dyn.onnx](fixtures/matmul_dyn.onnx) (118 bytes, regenerable via the one-liner in the file header).
 

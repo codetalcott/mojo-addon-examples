@@ -1,0 +1,167 @@
+ ______                 ______            _
+DONE. Output in /root/bench-rag-3d.txt (163 lines)
+Run: cat /root/bench-rag-3d.txt
+=== PHASE 3D H100 RAG-SHAPE BENCH ===
+Wed Apr 15 15:36:21 UTC 2026
+
+Wed Apr 15 15:36:21 2026
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.126.09             Driver Version: 580.126.09     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA H100 80GB HBM3          On  |   00000000:19:00.0 Off |                    0 |
+| N/A   34C    P0             72W /  700W |       0MiB /  81559MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+
+Linux 2270ce3f9118 6.8.0-106-generic #106-Ubuntu SMP PREEMPT_DYNAMIC Fri Mar  6 07:58:08 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+v22.22.2
+
+671fe31
+
+=== BUILD: matmul_cached.node ===
+        def(NapiEnv, NapiValue, OpaquePointer[MutAnyOrigin]) abi("C") -> NapiStatus
+        ^
+Build complete: matmul/build/matmul_cached.node
+
+=== REGRESSION: matmul test_cached ===
+matmul-cached: OK (115 correctness cases)
+
+=== BENCH: matmul_rag (3d, --full) ===
+--- matmul RAG-shape benchmark ---
+
+  mode: full (includes 1M-corpus shapes)
+  concurrency: 100 sync calls per batch
+  ORT baseline: onnxruntime-node 1.24.3 (CPU)
+  HNSW baseline: hnswlib-node (approximate, measured at k=10 with recall)
+
+=== Correctness (rectangular 4×64 × 64×1000) ===
+  mismatches: 0/4000 (0.000%, rtol=1e-1)
+  PASS
+
+=== query × 100K corpus (d=768) ===
+  shape: [1, 768] × [768, 100000]
+  flops: 0.15 GFLOP/call
+  device B: 307MB, per-call dst: 0.4MB
+  JS loop:      256.11ms/op  0.60 GFLOP/s  (baseline)
+  ORT CPU:      5.40ms/op  28.43 GFLOP/s  (onnxruntime-node MatMul)
+  GPU cached:   0.97ms/op  157.55 GFLOP/s  263× vs JS, 5.5× vs ORT
+                (loadMatrixGpu: 296.3ms one-time)
+  burst=100: p50=0.17ms p95=0.17ms p99=0.17ms  5997 QPS  (ratio p99/p50=1.1×)
+  GPU search:   4.18ms/op  (searchHandle top-10, exact)
+  hnswlib HNSW: building index for N=100000, d=768... done (142.2s)
+                ef= 100: 0.64ms/op  recall@10=0.10  (HNSW 6.5× faster)
+                ef= 500: 2.47ms/op  recall@10=0.20  (HNSW 1.7× faster)
+                ef=2000: 13.70ms/op  recall@10=0.60  (GPU 3.3× faster)
+
+=== query × 100K corpus (d=1536) ===
+  shape: [1, 1536] × [1536, 100000]
+  flops: 0.31 GFLOP/call
+  device B: 614MB, per-call dst: 0.4MB
+  JS loop:      skipped (est 2.0s > 2s budget)
+  ORT CPU:      16.42ms/op  18.71 GFLOP/s  (onnxruntime-node MatMul)
+  GPU cached:   1.85ms/op  166.23 GFLOP/s  8.9× vs ORT
+                (loadMatrixGpu: 2101.1ms one-time)
+  burst=100: p50=0.27ms p95=0.28ms p99=77.38ms  961 QPS  (ratio p99/p50=288.3×)
+  GPU search:   0.38ms/op  (searchHandle top-10, exact)
+
+=== batch-64 × 100K corpus ===
+  shape: [64, 768] × [768, 100000]
+  flops: 9.83 GFLOP/call
+  device B: 307MB, per-call dst: 25.6MB
+  JS loop:      skipped (est 65.5s > 2s budget)
+  ORT CPU:      104.18ms/op  94.36 GFLOP/s  (onnxruntime-node MatMul)
+  GPU cached:   10.63ms/op  924.93 GFLOP/s  9.8× vs ORT
+                (loadMatrixGpu: 220.6ms one-time)
+  burst=100: p50=2.72ms p95=82.69ms p99=91.78ms  71 QPS  (ratio p99/p50=33.7×)
+  GPU search:   20.48ms/op  (searchHandle top-10, exact)
+  hnswlib HNSW: reusing cached index for N=100000, d=768
+                ef= 100: 75.84ms/op  recall@10=0.08  (GPU 3.7× faster)
+                ef= 500: 354.46ms/op  recall@10=0.30  (GPU 17.3× faster)
+                ef=2000: 1068.54ms/op  recall@10=0.65  (GPU 52.2× faster)
+
+=== batch-256 × 100K corpus (offline) ===
+  shape: [256, 768] × [768, 100000]
+  flops: 39.32 GFLOP/call
+  device B: 307MB, per-call dst: 102.4MB
+  JS loop:      skipped (est 262.1s > 2s budget)
+  ORT CPU:      429.76ms/op  91.50 GFLOP/s  (onnxruntime-node MatMul)
+  GPU cached:   89.59ms/op  438.89 GFLOP/s  4.8× vs ORT
+                (loadMatrixGpu: 303.1ms one-time)
+  burst=100: p50=16.62ms p95=26.39ms p99=96.47ms  51 QPS  (ratio p99/p50=5.8×)
+  GPU search:   35.28ms/op  (searchHandle top-10, exact)
+  hnswlib HNSW: reusing cached index for N=100000, d=768
+                ef= 100: 304.43ms/op  recall@10=0.07  (GPU 8.6× faster)
+                ef= 500: 1186.23ms/op  recall@10=0.27  (GPU 33.6× faster)
+                ef=2000: 4086.62ms/op  recall@10=0.66  (GPU 115.8× faster)
+
+=== query × 1M corpus (d=768) ===
+  shape: [1, 768] × [768, 1000000]
+  flops: 1.54 GFLOP/call
+  device B: 3072MB, per-call dst: 4.0MB
+  JS loop:      skipped (est 10.2s > 2s budget)
+  ORT CPU:      99.43ms/op  15.45 GFLOP/s  (onnxruntime-node MatMul)
+  GPU cached:   1.48ms/op  1040.32 GFLOP/s  67.3× vs ORT
+                (loadMatrixGpu: 3793.5ms one-time)
+  burst=100: p50=1.48ms p95=1.48ms p99=1.49ms  678 QPS  (ratio p99/p50=1.0×)
+  GPU search:   2.47ms/op  (searchHandle top-10, exact)
+
+=== query × 1M corpus (d=1536) ===
+  shape: [1, 1536] × [1536, 1000000]
+  flops: 3.07 GFLOP/call
+  device B: 6144MB, per-call dst: 4.0MB
+  JS loop:      skipped (est 20.5s > 2s budget)
+  ORT CPU:      181.45ms/op  16.93 GFLOP/s  (onnxruntime-node MatMul)
+  GPU cached:   2.64ms/op  1165.69 GFLOP/s  68.9× vs ORT
+                (loadMatrixGpu: 5471.4ms one-time)
+  burst=100: p50=2.47ms p95=2.48ms p99=2.55ms  405 QPS  (ratio p99/p50=1.0×)
+  GPU search:   3.44ms/op  (searchHandle top-10, exact)
+
+=== batch-64 × 1M corpus ===
+  shape: [64, 768] × [768, 1000000]
+  flops: 98.30 GFLOP/call
+  device B: 3072MB, per-call dst: 256.0MB
+  JS loop:      skipped (est 655.4s > 2s budget)
+  ORT CPU:      939.77ms/op  104.60 GFLOP/s  (onnxruntime-node MatMul)
+  GPU cached:   49.14ms/op  2000.49 GFLOP/s  19.1× vs ORT
+                (loadMatrixGpu: 2075.4ms one-time)
+  burst=100: p50=47.47ms p95=50.53ms p99=56.32ms  21 QPS  (ratio p99/p50=1.2×)
+  GPU search:   82.92ms/op  (searchHandle top-10, exact)
+
+
+=== nvidia-smi FINAL ===
+Wed Apr 15 15:42:59 2026
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.126.09             Driver Version: 580.126.09     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA H100 80GB HBM3          On  |   00000000:19:00.0 Off |                    0 |
+| N/A   38C    P0            128W /  700W |       0MiB /  81559MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+
+=== DONE ===
+Wed Apr 15 15:42:59 UTC 2026
+root@2270ce3f9118:~/mojo-addon-examples#
