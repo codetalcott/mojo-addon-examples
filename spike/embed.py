@@ -27,7 +27,7 @@ from pathlib import Path
 
 import numpy as np
 from huggingface_hub import snapshot_download
-from safetensors.torch import load_file as safetensors_load
+from safetensors.numpy import load_file as safetensors_load
 from transformers import AutoConfig
 
 from max import driver
@@ -64,10 +64,8 @@ def _load_weights(model_dir: Path) -> dict:
             f"No model.safetensors in {model_dir}. MiniLM should ship this; "
             f"check that snapshot_download completed."
         )
-    # safetensors returns a dict of {name: torch.Tensor}.
-    # Convert to numpy; weights will later be wrapped in WeightData by MAX.
-    raw = safetensors_load(str(st_path))
-    return {k: v.detach().cpu().numpy() for k, v in raw.items()}
+    # safetensors.numpy returns a dict of {name: np.ndarray} directly.
+    return safetensors_load(str(st_path))
 
 
 class _NumpyWeights:
