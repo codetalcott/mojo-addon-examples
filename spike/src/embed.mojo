@@ -10,7 +10,7 @@
 ## DAY 1 GOAL: `node spike/test-roundtrip.js` prints a (batch × 384) array of
 ## zeros with no thrown errors. Nothing more.
 
-from std.memory import memset
+from std.memory import memset, alloc
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error
@@ -37,18 +37,21 @@ def _stub_forward(
 def embed_tokens_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var b = CbArgs.get_bindings(env, info)
-        var args = CbArgs.get_five(b, env, info)
+        # napi-mojo's CbArgs tops out at get_four; use get_argv for 5 args.
+        var argv = alloc[NapiValue](5)
+        CbArgs.get_argv(b, env, info, 5, argv)
 
-        # args[0]: Int32Array of token IDs, shape [batch, seqLen]
-        # args[1]: Int32Array of attention mask, shape [batch, seqLen]
-        # args[2]: Int (batch)
-        # args[3]: Int (seqLen)
-        # args[4]: Float32Array dst, shape [batch, EMBED_DIM]
-        var ids_ta = JsTypedArray(args[0])
-        var mask_ta = JsTypedArray(args[1])
-        var batch = Int(JsInt32.from_napi_value(b, env, args[2]))
-        var seq_len = Int(JsInt32.from_napi_value(b, env, args[3]))
-        var dst_ta = JsTypedArray(args[4])
+        # argv[0]: Int32Array of token IDs, shape [batch, seqLen]
+        # argv[1]: Int32Array of attention mask, shape [batch, seqLen]
+        # argv[2]: Int (batch)
+        # argv[3]: Int (seqLen)
+        # argv[4]: Float32Array dst, shape [batch, EMBED_DIM]
+        var ids_ta = JsTypedArray(argv[0])
+        var mask_ta = JsTypedArray(argv[1])
+        var batch = Int(JsInt32.from_napi_value(b, env, argv[2]))
+        var seq_len = Int(JsInt32.from_napi_value(b, env, argv[3]))
+        var dst_ta = JsTypedArray(argv[4])
+        argv.free()
 
         # Dimension validation — cheap safety net, catches wrong sizes early.
         var ids_len = Int(ids_ta.length(b, env))
