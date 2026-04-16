@@ -31,20 +31,22 @@ async function tokenize(texts) {
     padding: true,
     truncation: true,
     max_length: MAX_SEQ_LEN,
-    return_tensors: null,
   });
 
-  const batch = texts.length;
-  // encoded.input_ids and encoded.attention_mask are nested arrays [batch][seqLen].
-  const seqLen = encoded.input_ids[0].length;
+  // @huggingface/transformers v4 returns Tensor objects with:
+  //   .dims = [batch, seqLen]
+  //   .data = BigInt64Array (token IDs) / BigInt64Array (mask)
+  // MiniLM vocab=30522 fits in int32, so we safely down-cast BigInt -> Number.
+  const [batch, seqLen] = encoded.input_ids.dims;
+  const idsData = encoded.input_ids.data;
+  const maskData = encoded.attention_mask.data;
+  const n = batch * seqLen;
 
-  const ids = new Int32Array(batch * seqLen);
-  const mask = new Int32Array(batch * seqLen);
-  for (let i = 0; i < batch; i++) {
-    for (let j = 0; j < seqLen; j++) {
-      ids[i * seqLen + j] = encoded.input_ids[i][j];
-      mask[i * seqLen + j] = encoded.attention_mask[i][j];
-    }
+  const ids = new Int32Array(n);
+  const mask = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    ids[i] = Number(idsData[i]);
+    mask[i] = Number(maskData[i]);
   }
   return { ids, mask, batch, seqLen };
 }
