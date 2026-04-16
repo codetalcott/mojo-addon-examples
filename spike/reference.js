@@ -150,7 +150,9 @@ async function main() {
   header.writeUInt32LE(SANITY_SET.length, 8);
   header.writeUInt32LE(EMBED_DIM, 12);
 
-  const outPath = path.join(__dirname, 'fixtures', 'ground-truth.bin');
+  const fixturesDir = path.join(__dirname, 'fixtures');
+  fs.mkdirSync(fixturesDir, { recursive: true });
+  const outPath = path.join(fixturesDir, 'ground-truth.bin');
   const fd = fs.openSync(outPath, 'w');
   fs.writeSync(fd, header);
   fs.writeSync(fd, Buffer.from(out.data.buffer, out.data.byteOffset, out.data.byteLength));

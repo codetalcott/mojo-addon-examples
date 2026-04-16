@@ -81,8 +81,10 @@ def embed_tokens_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         )
 
         return JsNumber.create(b, env, 0.0).value
-    except e:
-        throw_js_error(env, String("embedTokens failed: ", e))
+    except:
+        # throw_js_error takes a StringLiteral only; the Python exception
+        # details go to stderr. Inspect the capture file for what failed.
+        throw_js_error(env, "embedTokens failed (see pod stderr)")
         return NapiValue()
 
 
