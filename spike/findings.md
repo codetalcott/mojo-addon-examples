@@ -27,6 +27,7 @@ Per the original plan: write `spike/src/embed.mojo` with `from max.graph import 
 ### What we actually found
 
 **There is no Mojo-native model loader in MAX v26.** The high-level inference surface is Python-only:
+
 - `max.graph.Graph`, `max.nn.Module`, `max.engine.InferenceSession` — Python
 - `max/c/model.h` C API exists (`M_compileModel`, `M_executeModelSync`) but expects pre-compiled graphs from Python tooling
 - Compiled `.mojopkg` files under `.pixi/envs/default/lib/mojo/` (`nn`, `tensor`, `weights_registry`, `pipeline`) expose primitive ops + scheduling — not model loaders
@@ -79,9 +80,68 @@ Confirmed working combos stored in [`probe_dlpack.py`](probe_dlpack.py) captures
 
 ---
 
-## Day 2 — to be filled in
+## Day 2 — Python embedding engine
 
-(embedding pipeline skeleton)
+### What works now
+
+[`spike/embed.py`](embed.py) runs `sentence-transformers/all-MiniLM-L6-v2` on H100 via MAX:
+
+```text
+embeddings shape: (2, 384)  dtype: float32
+latency: 9.8ms for batch-2   (cold-start, includes H2D + D2H)
+```
+
+Capture: `docs/runpod-embed-day2-20260416T232817Z.txt`.
+
+### Key discoveries that shaped Day 2
+
+1. **MAX ships a BERT pipeline for MiniLM-L6-v2.** [Upstream source](https://github.com/modular/modular/tree/main/max/python/max/pipelines/architectures/bert). `BertModel` lists `sentence-transformers/all-MiniLM-L6-v2` and `all-MiniLM-L12-v2` as supported. No need to hand-build the transformer graph.
+2. **The `max.pipelines` framework has heavy deps** — pydantic, pillow, msgspec, and a growing list for diffusion/vision/LLM models. For our embedding-only spike, we vendored the two files we actually need (`graph.py`, `weight_adapters.py`) as [`spike/bert_graph.py`](bert_graph.py) + [`spike/bert_weight_adapter.py`](bert_weight_adapter.py), with a minimal duck-typed `BertModelConfig`. Saves ~300MB of deps and avoids churn as upstream's architecture registry evolves.
+3. **`safetensors.numpy` is the right loader.** `safetensors.torch` requires PyTorch. `safetensors.numpy.load_file` returns `dict[str, np.ndarray]` directly — zero dep on torch.
+4. **`transformers`'s "PyTorch was not found" warning is cosmetic.** We only use `AutoConfig.from_pretrained()` for BERT architecture params — no model loading through transformers.
+5. **L2-normalization isn't automatic.** `BertModel` with `pool_embeddings=True` does mean-pooling but not final L2-normalize. sentence-transformers adds this. Spike will add L2-normalize either in `embed.py` or in Mojo post-processing.
+
+### Lockfile + bootstrap hygiene
+
+Committing `pixi.lock` caused constant conflicts on pods (pixi regenerates it on every `pixi install`). Removed from tracking and gitignored.
+
+Pod-side `bootstrap.sh` needed a `git reset --hard` before the checkout to discard local modifications. Fixed in `scripts/bootstrap.sh`. Volume bootstrap was updated on 2026-04-16.
+
+`scripts/runpod-launch.sh` now soft-sources bootstrap (failure doesn't abort the wrapper) and the command itself is expected to sync the repo state. This pattern is more robust to stale volumes.
+
+### Deps added
+
+```toml
+[dependencies]
+# Python spike side
+pydantic = ">=2.0"          # required by huggingface_hub
+transformers = ">=4.40"     # AutoConfig for BERT architecture params
+safetensors = ">=0.4"       # numpy loader for model weights
+huggingface_hub = ">=0.20"  # snapshot_download for MiniLM assets
+pillow = ">=10.0"           # transitive, max.interfaces imports PIL
+```
+
+~120MB added to the pixi env. All conda-forge.
+
+### Still pending (Day 3)
+
+1. **Mojo-side integration.** Rewrite [`spike/src/embed.mojo`](src/embed.mojo) `embed_tokens_fn` to:
+   - `Python.add_to_path("/workspace/mojo-addon-examples/spike")`
+   - `Python.import_module("embed")`
+   - Create / cache an `EmbeddingEngine` instance
+   - Call `engine.embed_batch(ids_np, mask_np)` and write result to N-API dst buffer
+2. **L2-normalize.** Either in `embed.py` (add `embeddings /= np.linalg.norm(embeddings, axis=1, keepdims=True)`) or in Mojo.
+3. **Correctness gate (F4).** Compare Mojo-produced embeddings to `spike/reference.js` output; expect cosine similarity ≥ 0.995. Ideally run the sanity set through both pipelines and diff.
+4. **Latency probe.** 9.8ms for cold batch-2 isn't definitive. Need warm single-query + warm batch-64 numbers. That's Day 5 (Gate F2).
+
+### Numbers to beat on Day 5
+
+From the spike plan:
+
+- Batch-1: ≤ 5ms p50
+- Batch-64: ≤ 20ms p50
+
+Today's 9.8ms batch-2 cold-start is preliminary; warm batch-1 likely ≥ 3ms (dominated by kernel launch overhead at this shape). TBD.
 
 ## Day 3 — to be filled in
 
