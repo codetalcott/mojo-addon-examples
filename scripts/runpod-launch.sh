@@ -252,8 +252,15 @@ done
 REMOTE_SCRIPT=$(cat <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-source "$BOOTSTRAP"
-cd /workspace/mojo-addon-examples
+# Soft-source bootstrap: set up PATH + auth, but don't fail the whole run if
+# the volume's bootstrap has stale logic (e.g., git-reset pattern). The
+# caller's command is expected to do its own repo sync regardless.
+source "$BOOTSTRAP" 2>&1 || echo "[warn] bootstrap exited non-zero; continuing"
+# Re-export what bootstrap should have set in case it failed before the exports.
+export PATH="/workspace/persist/bin:/workspace/persist/pixi-home/bin:\$PATH"
+export PIXI_CACHE_DIR=/workspace/persist/pixi-cache
+export HF_HOME=/workspace/persist/model-cache
+cd /workspace/mojo-addon-examples 2>/dev/null || true
 echo "=== host \$(hostname) === \$(date -u) ==="
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || true
 echo "=== command: $COMMAND ==="
