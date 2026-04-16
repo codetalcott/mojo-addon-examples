@@ -20,3 +20,4 @@ docs/runpod-seed-*.txt
 docs/runpod-prewarm-*.txt
 docs/runpod-volume-update-*.txt
 docs/lambda-bench-*.txt
+pixi.lock

@@ -35,6 +35,10 @@ fi
 cd "$REPO"
 
 git fetch origin
+# Discard any local modifications first — pod disk is ephemeral, and
+# `pixi install` / build steps routinely touch lockfiles that would
+# otherwise block the checkout.
+git reset --hard HEAD 2>/dev/null || true
 # Always force-reset to origin's spike branch. Using -B (not -b) handles the
 # case where a prior session's `git checkout -b` created a local branch
 # tracking main — plain `git checkout spike/...` would silently succeed on
@@ -44,5 +48,7 @@ if git ls-remote --exit-code origin spike/embedding-kernel >/dev/null 2>&1; then
 else
   git checkout -B spike/embedding-kernel origin/main
 fi
+# Belt-and-suspenders: ensure the tree matches origin exactly.
+git reset --hard "origin/$(git rev-parse --abbrev-ref HEAD)" 2>/dev/null || true
 
 echo "Ready. cd $REPO (on $(git rev-parse --abbrev-ref HEAD) at $(git rev-parse --short HEAD))"
