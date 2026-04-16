@@ -8,9 +8,12 @@
     "build": "bash build.sh",
     "roundtrip": "node test-roundtrip.js",
     "reference": "node reference.js",
+    "demo": "node demo.js",
+    "demo-reference": "node demo-reference.js",
     "bench": "node bench.js"
   },
   "dependencies": {
-    "@huggingface/transformers": "^4.1.0"
+    "@huggingface/transformers": "^4.1.0",
+    "hnswlib-node": "^3.0.0"
   }
 }
