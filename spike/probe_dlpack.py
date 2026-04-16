@@ -43,7 +43,11 @@ print(f"Model: {type(model).__name__}")
 
 a_np = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
 b_np = np.array([10.0, 20.0, 30.0, 40.0], dtype=np.float32)
-result = model.execute(a_np, b_np)
+# Inputs must live on the target device. Host->device via Buffer.
+a_gpu = driver.Buffer.from_numpy(a_np).to(dev)
+b_gpu = driver.Buffer.from_numpy(b_np).to(dev)
+print(f"a_gpu: {a_gpu}  device={a_gpu.device}")
+result = model.execute(a_gpu, b_gpu)
 print(f"execute returned: {type(result)}  len={len(result) if hasattr(result, '__len__') else 'n/a'}")
 r0 = result[0]
 print(f"r0: {type(r0).__name__}  module={type(r0).__module__}")
