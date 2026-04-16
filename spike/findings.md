@@ -143,9 +143,94 @@ From the spike plan:
 
 Today's 9.8ms batch-2 cold-start is preliminary; warm batch-1 likely ≥ 3ms (dominated by kernel launch overhead at this shape). TBD.
 
-## Day 3 — to be filled in
+## Day 3 — Mojo↔Python bridge + Gate F4 PASS
 
-(real MiniLM-L6-v2 with weight adapter)
+### What works now (end-to-end, on H100)
+
+```text
+min cosine:  0.999990   (target ≥ 0.995)
+mean cosine: 0.999998
+cold:  27.9 s  (model download + MAX graph compile + first kernel launch)
+warm:  2.82 ms/op  batch-100 × seq_len-14  (20-iter average)
+```
+
+Full pipeline: JS tokenize → N-API `embedTokens` → Mojo `embed_tokens_fn`
+→ `Python.import_module("embed")` → `embed.embed_batch_from_addrs` (Python)
+→ `EmbeddingEngine.embed_batch_l2` → MAX graph on H100 → fp32 embeddings
+→ ctypes.memmove into JS-owned `Float32Array`.
+
+Capture: `docs/runpod-day3-20260416T234521Z.txt`.
+
+### Numerical parity to CPU reference
+
+Comparison is against `@huggingface/transformers` CPU-side (Xenova's ONNX
+MiniLM) on the same 100-sentence sanity set. **6-decimal-place agreement**
+across all 100 sentences. MAX's fp32 BERT forward matches ONNX Runtime's
+fp32 BERT forward essentially to the bit-representation precision.
+
+Worst offender: sentence 36 ("Comments explain why, not what.") at cosine
+0.999990. The minor drift is in the last 3 float32 decimal places —
+dominated by ULP-level accumulation order differences, not model bugs.
+
+### Mojo ↔ Python handoff details
+
+- Mojo gets raw pointers from N-API (`JsTypedArray.data_ptr`).
+- `Int(ptr)` implicitly converts the pointer to integer address.
+- Python reads via `numpy.ctypeslib.as_array((c_int32 * n).from_address(addr))`
+  — zero-copy view of the JS memory.
+- Output: `ctypes.memmove(dst_addr, result.ctypes.data_as(c_void_p), nbytes)`
+  writes into the JS Float32Array directly.
+- `EmbeddingEngine` instance is a module-level singleton in `spike/embed.py`;
+  first N-API call pays the 28s cold-start, subsequent calls reuse the
+  compiled graph.
+
+### Gotchas found during Day 3
+
+1. **`@huggingface/transformers` v4 changed the tokenizer return API.** v2
+   (Xenova) returned nested JS arrays for `input_ids`; v4 returns a Tensor
+   object with `.dims = [batch, seqLen]` and `.data = BigInt64Array`. Had to
+   rewrite `spike/tokenize.js` to use `.dims` + down-cast BigInt → Number.
+2. **`throw_js_error` takes `StringLiteral`, not `String`.** Mojo error
+   formatting can't be used with this API. The Python exception details go
+   to stderr instead; good enough for a spike.
+3. **`pixi.lock` and `package-lock.json` churn on the pod.** Now
+   gitignored; bootstrap does `git reset --hard HEAD` before checkout.
+4. **`spike/fixtures/` directory needs `mkdir -p`** before first write —
+   .gitignore'd contents means the dir doesn't exist on a fresh clone.
+   `spike/reference.js` now creates it.
+
+### Gate F2 — preliminary PASS
+
+Spike plan targets for batch-64: ≤ 20 ms p50. Today's batch-100 × seq_len-14
+at **2.82 ms** crushes that by ~7×. Caveats:
+
+- Real query shape is batch-1, seq_len ~ 16–128. Per-op fixed overhead
+  (Python FFI + MAX kernel launch) is likely 1–3 ms regardless of batch.
+  So batch-1 will look WORSE per-sample than batch-100.
+- Longer sequences (seq_len=128 for production MS-MARCO passages) will
+  increase compute cost ~10× compared to seq_len=14.
+- These are warm-path numbers after ~20 iterations. Cold-start is 28s
+  (acceptable for a long-running service; fatal for scripts/CLI).
+
+Day 5 benchmarks will measure batch-1/8/32/64 at seq_len=32/128 to give
+honest per-shape numbers.
+
+### What's left for Day 4
+
+1. Wire a proper demo: `spike/demo.js` with a small corpus (say 1000
+   MS-MARCO passages), tokenize + embed + search via `packages/rag`
+   primitives. End-to-end "local GPU semantic search from Node."
+2. Matmul + top-k path — the `packages/rag` kernels already do this;
+   need to make sure the embeddings we produce feed into them cleanly.
+3. `spike/demo-reference.js` — same flow using `@huggingface/transformers` and
+   `hnswlib-node` (no MAX, no Mojo) for apples-to-apples comparison.
+
+### Numbers that now matter for Day 10
+
+- **Warm batch-1 at seq_len=32**: expected ~1-2 ms based on Day 3 data
+- **Warm batch-1 at seq_len=128**: expected ~2-5 ms
+- **End-to-end (tokenize + embed + search + top-10) for a 10k corpus**:
+  target ≤ 5 ms on H100 per query
 
 ## Day 5 — to be filled in
 
