@@ -12,3 +12,11 @@ skills-lock.json
 grail.yaml
 examples/rag-demo/fixtures/*.bin
 examples/rag-demo/fixtures/.cache/
+
+# RunPod per-session capture files — regenerated on every launch.
+# Preserve deliberately with `git add -f docs/runpod-bench-day{5,10}-*.txt`.
+docs/runpod-bench-*.txt
+docs/runpod-seed-*.txt
+docs/runpod-prewarm-*.txt
+docs/runpod-volume-update-*.txt
+docs/lambda-bench-*.txt
