@@ -20,6 +20,7 @@ Usage (Mojo via Python interop — next step):
 
 from __future__ import annotations
 
+import ctypes
 import logging
 import os
 import time
@@ -134,6 +135,12 @@ class EmbeddingEngine:
 
         log.info(f"ready  (compile: {t2-t1:.1f}s, total init: {t2-t0:.1f}s)")
 
+    def embed_batch_l2(self, token_ids: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
+        """Embed + L2-normalize. Matches sentence-transformers default."""
+        out = self.embed_batch(token_ids, attention_mask)
+        norms = np.linalg.norm(out, axis=1, keepdims=True)
+        return (out / np.maximum(norms, 1e-12)).astype(np.float32, copy=False)
+
     def embed_batch(self, token_ids: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
         """Embed a batch of token-id sequences.
 
@@ -159,6 +166,69 @@ class EmbeddingEngine:
         # For now we return numpy (D2H bounce). Zero-copy via DLPack is
         # Phase 2 once Mojo-side wrapping is wired up.
         return out.to_numpy()
+
+
+# --- Singleton + Mojo-facing entrypoint ------------------------------------
+
+_ENGINE_SINGLETON: EmbeddingEngine | None = None
+
+
+def get_engine(device: str = "gpu") -> EmbeddingEngine:
+    """Lazy singleton. First call pays the model download + compile cost;
+    subsequent calls return the cached instance. Mojo reuses this across
+    N-API invocations for the duration of the Node process."""
+    global _ENGINE_SINGLETON
+    if _ENGINE_SINGLETON is None:
+        _ENGINE_SINGLETON = EmbeddingEngine(device=device)
+    return _ENGINE_SINGLETON
+
+
+def embed_batch_from_addrs(
+    ids_addr: int,
+    mask_addr: int,
+    dst_addr: int,
+    batch: int,
+    seq_len: int,
+    embed_dim: int,
+) -> int:
+    """Called from Mojo via Python interop. Reads int32 token IDs + int32
+    attention mask from raw JS-owned addresses, runs the MAX embedder,
+    L2-normalizes, writes float32 output into the JS-owned dst buffer.
+
+    Returns 0 on success; raises on failure (which surfaces as a Python
+    exception that Mojo's try/except converts to a JS error)."""
+    n = batch * seq_len
+
+    # View the JS Int32Arrays as numpy without copying. We upcast to int64
+    # for BERT and float32 for the mask in a second pass (makes a copy, but
+    # at n=128*64=8k elements that's ~30μs — negligible).
+    ids_raw = np.ctypeslib.as_array(
+        (ctypes.c_int32 * n).from_address(ids_addr)
+    ).reshape(batch, seq_len)
+    mask_raw = np.ctypeslib.as_array(
+        (ctypes.c_int32 * n).from_address(mask_addr)
+    ).reshape(batch, seq_len)
+
+    ids = ids_raw.astype(np.int64, copy=True)
+    mask = mask_raw.astype(np.float32, copy=True)
+
+    engine = get_engine()
+    result = engine.embed_batch_l2(ids, mask)  # (batch, embed_dim) fp32
+
+    if result.shape != (batch, embed_dim):
+        raise RuntimeError(
+            f"unexpected embedding shape: got {result.shape}, expected ({batch}, {embed_dim})"
+        )
+    if not result.flags["C_CONTIGUOUS"]:
+        result = np.ascontiguousarray(result)
+
+    # Copy fp32 embeddings into the JS-owned Float32Array.
+    ctypes.memmove(
+        dst_addr,
+        result.ctypes.data_as(ctypes.c_void_p),
+        batch * embed_dim * 4,
+    )
+    return 0
 
 
 def _demo():

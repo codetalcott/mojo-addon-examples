@@ -1,16 +1,15 @@
-## spike/src/embed.mojo — MAX graph + embedTokens N-API binding (DAY 1 STUB)
+## spike/src/embed.mojo — Python-interop embedding via MAX (Day 3)
 ##
-## Day 1: embedTokens fills dst with zeros. Proves the N-API arg unpacking
-## works end-to-end and the build toolchain compiles against napi-mojo.
+## Calls spike/embed.py (which loads sentence-transformers/all-MiniLM-L6-v2
+## on MAX + H100) via Python interop, reading JS token buffers by raw address
+## and writing embeddings back to the JS Float32Array.
 ##
-## Day 2: replace _stub_forward() with a real MAX graph forward pass over
-## MiniLM-L6-v2. Pattern to study: node_modules/napi-mojo/src/addon/async_ops.mojo
-## for async wrapping (will want this after Day 5 passes).
-##
-## DAY 1 GOAL: `node spike/test-roundtrip.js` prints a (batch × 384) array of
-## zeros with no thrown errors. Nothing more.
+## The Python engine is lazily constructed on first call and cached by
+## embed.py as a module-level singleton — subsequent N-API calls reuse the
+## compiled MAX graph (cold-start cost amortized over the session).
 
-from std.memory import memset, alloc
+from std.memory import alloc
+from std.python import Python, PythonObject
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error
@@ -22,16 +21,16 @@ from napi.framework.args import CbArgs
 from napi.framework.register import fn_ptr, ModuleBuilder
 
 
-alias EMBED_DIM = 384  # MiniLM-L6-v2
+alias EMBED_DIM = 384
 
 
-def _stub_forward(
-    dst_bytes: UnsafePointer[Byte, MutAnyOrigin],
-    batch: Int,
-):
-    # Day 1 placeholder: zero-fill. Day 2 replaces with MAX graph forward.
-    var n_bytes = batch * EMBED_DIM * 4
-    memset(dst_bytes, 0, n_bytes)
+def _import_embed_module() raises -> PythonObject:
+    # Ensure spike/ is importable. We try both absolute (pod) and relative
+    # paths so this works from the repo root on a laptop too.
+    var sys = Python.import_module("sys")
+    sys.path.insert(0, "/workspace/mojo-addon-examples/spike")
+    sys.path.insert(0, "spike")
+    return Python.import_module("embed")
 
 
 def embed_tokens_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -66,11 +65,24 @@ def embed_tokens_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         if dst_len < expected_dst:
             raise Error("embedTokens: dst too small")
 
+        # Raw pointers to JS-owned buffers. We pass their integer addresses
+        # to Python; Python uses ctypes.from_address to view them as numpy
+        # arrays without copying.
+        var ids_ptr = ids_ta.data_ptr(b, env)
+        var mask_ptr = mask_ta.data_ptr(b, env)
         var dst_ptr = dst_ta.data_ptr(b, env)
-        _stub_forward(dst_ptr, batch)
+        var ids_addr = Int(ids_ptr)
+        var mask_addr = Int(mask_ptr)
+        var dst_addr = Int(dst_ptr)
+
+        var embed = _import_embed_module()
+        _ = embed.embed_batch_from_addrs(
+            ids_addr, mask_addr, dst_addr, batch, seq_len, EMBED_DIM
+        )
+
         return JsNumber.create(b, env, 0.0).value
-    except:
-        throw_js_error(env, "embedTokens failed")
+    except e:
+        throw_js_error(env, String("embedTokens failed: ", e))
         return NapiValue()
 
 
