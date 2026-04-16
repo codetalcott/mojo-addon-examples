@@ -7,3 +7,4 @@ version = "0.1.0"
 
 [dependencies]
 max = ">=26.3.0.dev2026040905"
+nodejs = ">=22.12"
