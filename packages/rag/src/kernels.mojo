@@ -25,7 +25,15 @@ from std.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
 from layout import Coord, Idx, TileTensor, row_major
 from linalg.matmul import matmul as linalg_matmul
 
-from napi.types import NapiEnv, NapiValue
+from napi.types import (
+    NapiEnv,
+    NapiValue,
+    NapiStatus,
+    NapiDeferred,
+    NapiAsyncWork,
+    NapiRef,
+    NAPI_OK,
+)
 from napi.error import throw_js_error
 from napi.bindings import NapiBindings, Bindings
 from napi.framework.instance_data import set_instance_data, get_instance_data
@@ -33,6 +41,8 @@ from napi.framework.js_number import JsNumber
 from napi.framework.js_int32 import JsInt32
 from napi.framework.js_typedarray import JsTypedArray
 from napi.framework.js_external import JsExternal
+from napi.framework.js_ref import JsRef
+from napi.framework.async_work import AsyncWork
 from napi.framework.args import CbArgs
 from napi.framework.register import fn_ptr, ModuleBuilder
 
@@ -101,7 +111,7 @@ def _load_matrix_gpu(
 
     var dev_data = ctx.enqueue_create_buffer[dtype](num_elems)
     var staging = ctx.enqueue_create_host_buffer[dtype](num_elems)
-    var staging_ptr = staging.unsafe_ptr().value().bitcast[Byte]()
+    var staging_ptr = staging.unsafe_ptr().bitcast[Byte]()
     memcpy(dest=staging_ptr, src=src_bytes, count=num_bytes)
     ctx.enqueue_copy(dev_data, staging)
     ctx.synchronize()
@@ -157,7 +167,7 @@ def _matmul_cached(
     ctx.enqueue_copy(host_c, dev_c)
     ctx.synchronize()
 
-    var host_ptr = host_c.unsafe_ptr().value().bitcast[Byte]()
+    var host_ptr = host_c.unsafe_ptr().bitcast[Byte]()
     memcpy(dest=dst_bytes, src=host_ptr, count=c_elems * 4)
 
 
@@ -307,7 +317,7 @@ def _search_cached(
     ctx.enqueue_copy(host_c, dev_c)
     ctx.synchronize()
 
-    var host_ptr = host_c.unsafe_ptr().value()
+    var host_ptr = host_c.unsafe_ptr()
     for row in range(M):
         _topk_row(
             host_ptr + row * N,
@@ -363,6 +373,377 @@ def search_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return NapiValue()
 
 
+# --- Async variants of matmulHandle / searchHandle --------------------------
+#
+# These wrap the existing _matmul_cached / _search_cached helpers in napi-mojo
+# AsyncWork so the GPU work runs on the libuv threadpool instead of blocking
+# the Node event loop. Gate G2: event-loop p99 jitter < 5 ms under 100-
+# concurrent load.
+#
+# Cross-thread safety:
+#   - Externals (CachedMatrix handles) and the dst TypedArray are pinned via
+#     JsRef.create(..., 1) at submit time and unreffed in the complete
+#     callback. This prevents JS GC from freeing the backing store while
+#     the execute callback is mid-flight on the threadpool.
+#   - GpuState lives as per-env instance_data and is stable for the env
+#     lifetime; we pass a pointer, not a copy.
+#   - CUDA stream ops on a single DeviceContext serialize on the CUDA side
+#     when called from multiple threads; concurrent async submits enqueue
+#     work sequentially on the stream but do not trample. The event-loop
+#     benefit comes from unblocking the JS thread, not from true GPU
+#     parallelism — that would require per-stream contexts.
+
+
+struct MatmulAsyncData(Movable):
+    # JsRef is not Movable in napi-mojo 0.3.0, so we store the raw NapiRef
+    # handles (trivially copyable OpaquePointer) and reconstitute JsRef() at
+    # the complete-callback delete site. NapiRef is an alias for
+    # OpaquePointer[MutAnyOrigin].
+    var deferred: NapiDeferred
+    var work: NapiAsyncWork
+    var a_ref: NapiRef
+    var b_ref: NapiRef
+    var dst_ref: NapiRef
+    var a_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin]
+    var b_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin]
+    var dst_ptr: UnsafePointer[Byte, MutAnyOrigin]
+    var state_ptr: UnsafePointer[GpuState, MutAnyOrigin]
+    var had_error: Bool
+
+    def __init__(
+        out self,
+        a_ref: NapiRef,
+        b_ref: NapiRef,
+        dst_ref: NapiRef,
+        a_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin],
+        b_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin],
+        dst_ptr: UnsafePointer[Byte, MutAnyOrigin],
+        state_ptr: UnsafePointer[GpuState, MutAnyOrigin],
+    ):
+        self.deferred = NapiDeferred()
+        self.work = NapiAsyncWork()
+        self.a_ref = a_ref
+        self.b_ref = b_ref
+        self.dst_ref = dst_ref
+        self.a_ptr = a_ptr
+        self.b_ptr = b_ptr
+        self.dst_ptr = dst_ptr
+        self.state_ptr = state_ptr
+        self.had_error = False
+
+    def __moveinit__(out self, deinit take: Self):
+        self.deferred = take.deferred
+        self.work = take.work
+        self.a_ref = take.a_ref
+        self.b_ref = take.b_ref
+        self.dst_ref = take.dst_ref
+        self.a_ptr = take.a_ptr
+        self.b_ptr = take.b_ptr
+        self.dst_ptr = take.dst_ptr
+        self.state_ptr = take.state_ptr
+        self.had_error = take.had_error
+
+
+def matmul_async_execute(env: NapiEnv, data: OpaquePointer[MutAnyOrigin]):
+    var ptr = data.bitcast[MatmulAsyncData]()
+    try:
+        _matmul_cached(
+            ptr[].state_ptr[].ctx,
+            ptr[].a_ptr,
+            ptr[].b_ptr,
+            ptr[].dst_ptr,
+        )
+    except:
+        ptr[].had_error = True
+
+
+def matmul_async_complete(
+    env: NapiEnv, status: NapiStatus, data: OpaquePointer[MutAnyOrigin]
+):
+    var ptr = data.bitcast[MatmulAsyncData]()
+    try:
+        JsRef(ptr[].a_ref).delete(env)
+    except:
+        pass
+    try:
+        JsRef(ptr[].b_ref).delete(env)
+    except:
+        pass
+    try:
+        JsRef(ptr[].dst_ref).delete(env)
+    except:
+        pass
+    try:
+        if status == NAPI_OK and not ptr[].had_error:
+            var result_val = JsNumber.create(env, 0.0)
+            AsyncWork.resolve(
+                env, ptr[].deferred, ptr[].work, result_val.value
+            )
+        else:
+            AsyncWork.reject_with_error(
+                env, ptr[].deferred, ptr[].work, "matmulHandleAsync failed"
+            )
+    except:
+        pass
+    ptr.destroy_pointee()
+    ptr.free()
+
+
+def matmul_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+    try:
+        var b = CbArgs.get_bindings(env, info)
+        var args = CbArgs.get_three(b, env, info)
+
+        var a_ptr = JsExternal.get_typed[CachedMatrix](
+            b, env, args[0], "matmulHandleAsync A"
+        )
+        if a_ptr[].released:
+            raise Error("matmulHandleAsync: handle A has been released")
+
+        var b_ptr = JsExternal.get_typed[CachedMatrix](
+            b, env, args[1], "matmulHandleAsync B"
+        )
+        if b_ptr[].released:
+            raise Error("matmulHandleAsync: handle B has been released")
+
+        if a_ptr[].cols != b_ptr[].rows:
+            raise Error(
+                "matmulHandleAsync: dimension mismatch (A.cols != B.rows)"
+            )
+
+        var dst_ta = JsTypedArray(args[2])
+        var dst_len = Int(dst_ta.length(b, env))
+        var expected_len = a_ptr[].rows * b_ptr[].cols
+        if dst_len < expected_len:
+            raise Error("matmulHandleAsync: dst buffer too small")
+        var dst_raw = dst_ta.data_ptr(b, env)
+
+        var state = _get_gpu_state(b, env)
+
+        var a_ref = JsRef.create(b, env, args[0], UInt32(1)).handle
+        var b_ref = JsRef.create(b, env, args[1], UInt32(1)).handle
+        var dst_ref = JsRef.create(b, env, args[2], UInt32(1)).handle
+
+        var data_ptr = alloc[MatmulAsyncData](1)
+        data_ptr.init_pointee_move(
+            MatmulAsyncData(
+                a_ref, b_ref, dst_ref, a_ptr, b_ptr, dst_raw, state
+            )
+        )
+
+        var exec_ref = matmul_async_execute
+        var comp_ref = matmul_async_complete
+        var aw = AsyncWork.queue(
+            b,
+            env,
+            "matmulHandleAsync",
+            data_ptr.bitcast[NoneType](),
+            fn_ptr(exec_ref),
+            fn_ptr(comp_ref),
+        )
+        data_ptr[].deferred = aw.deferred
+        data_ptr[].work = aw.work
+        return aw.value
+    except:
+        throw_js_error(env, "matmulHandleAsync failed")
+        return NapiValue()
+
+
+struct SearchAsyncData(Movable):
+    # See MatmulAsyncData for the NapiRef-instead-of-JsRef rationale.
+    var deferred: NapiDeferred
+    var work: NapiAsyncWork
+    var a_ref: NapiRef
+    var b_ref: NapiRef
+    var idx_ref: NapiRef
+    var scores_ref: NapiRef
+    var a_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin]
+    var b_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin]
+    var idx_ptr: UnsafePointer[UInt32, MutAnyOrigin]
+    var scores_ptr: UnsafePointer[Float32, MutAnyOrigin]
+    var state_ptr: UnsafePointer[GpuState, MutAnyOrigin]
+    var k: Int
+    var had_error: Bool
+
+    def __init__(
+        out self,
+        a_ref: NapiRef,
+        b_ref: NapiRef,
+        idx_ref: NapiRef,
+        scores_ref: NapiRef,
+        a_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin],
+        b_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin],
+        idx_ptr: UnsafePointer[UInt32, MutAnyOrigin],
+        scores_ptr: UnsafePointer[Float32, MutAnyOrigin],
+        state_ptr: UnsafePointer[GpuState, MutAnyOrigin],
+        k: Int,
+    ):
+        self.deferred = NapiDeferred()
+        self.work = NapiAsyncWork()
+        self.a_ref = a_ref
+        self.b_ref = b_ref
+        self.idx_ref = idx_ref
+        self.scores_ref = scores_ref
+        self.a_ptr = a_ptr
+        self.b_ptr = b_ptr
+        self.idx_ptr = idx_ptr
+        self.scores_ptr = scores_ptr
+        self.state_ptr = state_ptr
+        self.k = k
+        self.had_error = False
+
+    def __moveinit__(out self, deinit take: Self):
+        self.deferred = take.deferred
+        self.work = take.work
+        self.a_ref = take.a_ref
+        self.b_ref = take.b_ref
+        self.idx_ref = take.idx_ref
+        self.scores_ref = take.scores_ref
+        self.a_ptr = take.a_ptr
+        self.b_ptr = take.b_ptr
+        self.idx_ptr = take.idx_ptr
+        self.scores_ptr = take.scores_ptr
+        self.state_ptr = take.state_ptr
+        self.k = take.k
+        self.had_error = take.had_error
+
+
+def search_async_execute(env: NapiEnv, data: OpaquePointer[MutAnyOrigin]):
+    var ptr = data.bitcast[SearchAsyncData]()
+    try:
+        _search_cached(
+            ptr[].state_ptr[].ctx,
+            ptr[].a_ptr,
+            ptr[].b_ptr,
+            ptr[].k,
+            ptr[].idx_ptr,
+            ptr[].scores_ptr,
+        )
+    except:
+        ptr[].had_error = True
+
+
+def search_async_complete(
+    env: NapiEnv, status: NapiStatus, data: OpaquePointer[MutAnyOrigin]
+):
+    var ptr = data.bitcast[SearchAsyncData]()
+    try:
+        JsRef(ptr[].a_ref).delete(env)
+    except:
+        pass
+    try:
+        JsRef(ptr[].b_ref).delete(env)
+    except:
+        pass
+    try:
+        JsRef(ptr[].idx_ref).delete(env)
+    except:
+        pass
+    try:
+        JsRef(ptr[].scores_ref).delete(env)
+    except:
+        pass
+    try:
+        if status == NAPI_OK and not ptr[].had_error:
+            var result_val = JsNumber.create(env, 0.0)
+            AsyncWork.resolve(
+                env, ptr[].deferred, ptr[].work, result_val.value
+            )
+        else:
+            AsyncWork.reject_with_error(
+                env, ptr[].deferred, ptr[].work, "searchHandleAsync failed"
+            )
+    except:
+        pass
+    ptr.destroy_pointee()
+    ptr.free()
+
+
+def search_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+    try:
+        var b = CbArgs.get_bindings(env, info)
+        var args = CbArgs.get_four(b, env, info)
+
+        var a_ptr = JsExternal.get_typed[CachedMatrix](
+            b, env, args[0], "searchHandleAsync A"
+        )
+        if a_ptr[].released:
+            raise Error("searchHandleAsync: handle A has been released")
+
+        var b_ptr = JsExternal.get_typed[CachedMatrix](
+            b, env, args[1], "searchHandleAsync B"
+        )
+        if b_ptr[].released:
+            raise Error("searchHandleAsync: handle B has been released")
+
+        if a_ptr[].cols != b_ptr[].rows:
+            raise Error(
+                "searchHandleAsync: dimension mismatch (A.cols != B.rows)"
+            )
+
+        var idx_ta = JsTypedArray(args[2])
+        var scores_ta = JsTypedArray(args[3])
+        var idx_len = Int(idx_ta.length(b, env))
+        var scores_len = Int(scores_ta.length(b, env))
+        if idx_len != scores_len:
+            raise Error(
+                "searchHandleAsync: indices and scores must have same length"
+            )
+
+        var M = a_ptr[].rows
+        if idx_len % M != 0:
+            raise Error(
+                "searchHandleAsync: output length must be a multiple of"
+                " A.rows"
+            )
+        var k = idx_len // M
+        if k <= 0:
+            raise Error("searchHandleAsync: k must be > 0")
+
+        var idx_raw = idx_ta.data_ptr(b, env).bitcast[UInt32]()
+        var scores_raw = scores_ta.data_ptr(b, env).bitcast[Float32]()
+
+        var state = _get_gpu_state(b, env)
+
+        var a_ref = JsRef.create(b, env, args[0], UInt32(1)).handle
+        var b_ref = JsRef.create(b, env, args[1], UInt32(1)).handle
+        var idx_ref = JsRef.create(b, env, args[2], UInt32(1)).handle
+        var scores_ref = JsRef.create(b, env, args[3], UInt32(1)).handle
+
+        var data_ptr = alloc[SearchAsyncData](1)
+        data_ptr.init_pointee_move(
+            SearchAsyncData(
+                a_ref,
+                b_ref,
+                idx_ref,
+                scores_ref,
+                a_ptr,
+                b_ptr,
+                idx_raw,
+                scores_raw,
+                state,
+                k,
+            )
+        )
+
+        var exec_ref = search_async_execute
+        var comp_ref = search_async_complete
+        var aw = AsyncWork.queue(
+            b,
+            env,
+            "searchHandleAsync",
+            data_ptr.bitcast[NoneType](),
+            fn_ptr(exec_ref),
+            fn_ptr(comp_ref),
+        )
+        data_ptr[].deferred = aw.deferred
+        data_ptr[].work = aw.work
+        return aw.value
+    except:
+        throw_js_error(env, "searchHandleAsync failed")
+        return NapiValue()
+
+
 # --- releaseMatrixGpu --------------------------------------------------------
 
 def release_matrix_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -394,9 +775,13 @@ def register_gpu_linalg(mut m: ModuleBuilder, b: Bindings) raises:
     var lmg_ref = load_matrix_gpu_fn
     var mh_ref = matmul_handle_fn
     var sh_ref = search_handle_fn
+    var mha_ref = matmul_handle_async_fn
+    var sha_ref = search_handle_async_fn
     var rmg_ref = release_matrix_gpu_fn
 
     m.method("loadMatrixGpu", fn_ptr(lmg_ref))
     m.method("matmulHandle", fn_ptr(mh_ref))
     m.method("searchHandle", fn_ptr(sh_ref))
+    m.method("matmulHandleAsync", fn_ptr(mha_ref))
+    m.method("searchHandleAsync", fn_ptr(sha_ref))
     m.method("releaseMatrixGpu", fn_ptr(rmg_ref))

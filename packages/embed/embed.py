@@ -1,18 +1,18 @@
-"""spike/embed.py — Python-side embedding engine.
+"""packages/embed/embed.py — Python-side embedding engine.
 
 Loads sentence-transformers/all-MiniLM-L6-v2 via MAX (using vendored pipeline
-code from spike/bert_graph.py to sidestep max.pipelines.lib dep hell) and
-exposes a simple `embed_batch(ids_np, mask_np) -> np.ndarray` for the Mojo
+code from packages/embed/bert_graph.py to sidestep max.pipelines.lib dep hell)
+and exposes a simple `embed_batch(ids_np, mask_np) -> np.ndarray` for the Mojo
 addon to call via Python interop.
 
 Usage (Python side, for testing):
-    import spike.embed as embed
+    import embed  # from packages/embed
     engine = embed.EmbeddingEngine(device='gpu')       # or 'cpu'
     embeddings = engine.embed_batch(token_ids, mask)   # returns (B, 384) fp32
 
-Usage (Mojo via Python interop — next step):
+Usage (Mojo via Python interop):
     var sys = Python.import_module("sys")
-    sys.path.append("/workspace/mojo-addon-examples/spike")
+    sys.path.append("/workspace/mojo-addon-examples/packages/embed")
     var embed_mod = Python.import_module("embed")
     var engine = embed_mod.EmbeddingEngine("gpu")
     var result = engine.embed_batch(ids_np, mask_np)
@@ -232,7 +232,7 @@ def embed_batch_from_addrs(
 
 
 def _demo():
-    """Minimal CLI: `python spike/embed.py` runs a sanity check."""
+    """Minimal CLI: `python packages/embed/embed.py` runs a sanity check."""
     engine = EmbeddingEngine(device=os.environ.get("SPIKE_DEVICE", "gpu"))
     # Dummy tokenized input — two short fake sequences
     # (real tokens come from @huggingface/transformers JS tokenizer in Day 4)

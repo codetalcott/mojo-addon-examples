@@ -1,14 +1,12 @@
-## spike/src/lib.mojo — embedding-kernel spike N-API entry point
+## packages/embed/src/lib.mojo — @qkstat/embed N-API entry point
 ##
-## Compiles into spike/build/embed.node. Load from Node via
-## `require('./spike/build/embed.node')`.
+## Compiles into packages/embed/build/embed.node. Load from Node via
+## `require('@qkstat/embed')` (or `require('./packages/embed/build/embed.node')`
+## during local development).
 ##
-## Registers one export for the Day 1 smoke test:
+## Exports:
 ##   embedTokens(tokenIds: Int32Array, attentionMask: Int32Array,
 ##               batch: Int, seqLen: Int, dstEmbeddings: Float32Array) -> 0
-##
-## Day 1: stub fills dst with zeros, proves the N-API boundary compiles.
-## Day 2+: wires to MAX graph in embed.mojo.
 
 from std.memory import alloc
 from napi.types import NapiEnv, NapiValue
@@ -39,7 +37,7 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
         try:
             var null_code = NapiValue()
             var err_msg = JsString.create_literal(
-                env, "spike/embed: register_module failed"
+                env, "@qkstat/embed: register_module failed"
             )
             var err_val = NapiValue()
             var err_ptr: OpaquePointer[MutAnyOrigin] = UnsafePointer(

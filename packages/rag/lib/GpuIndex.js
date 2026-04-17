@@ -50,6 +50,54 @@ class GpuIndex {
     return results;
   }
 
+  async searchAsync(queryEmbedding, k) {
+    const hQuery = this.addon.loadMatrixGpu(queryEmbedding, 1, this.dim);
+    const idx = new Uint32Array(k);
+    const scores = new Float32Array(k);
+    try {
+      await this.addon.searchHandleAsync(hQuery, this.hCorpus, idx, scores);
+    } finally {
+      this.addon.releaseMatrixGpu(hQuery);
+    }
+    const results = new Array(k);
+    for (let i = 0; i < k; i++) {
+      results[i] = { doc: this.docs[idx[i]], score: scores[i], index: idx[i] };
+    }
+    return results;
+  }
+
+  searchBatch(queries, k) {
+    const b = queries.length / this.dim;
+    if (!Number.isInteger(b) || b < 1) {
+      throw new Error(`GpuIndex.searchBatch: queries.length (${queries.length}) must be a multiple of dim (${this.dim})`);
+    }
+    const hQueries = this.addon.loadMatrixGpu(queries, b, this.dim);
+    const indices = new Uint32Array(b * k);
+    const scores = new Float32Array(b * k);
+    try {
+      this.addon.searchHandle(hQueries, this.hCorpus, indices, scores);
+    } finally {
+      this.addon.releaseMatrixGpu(hQueries);
+    }
+    return { indices, scores, batch: b, k };
+  }
+
+  async searchBatchAsync(queries, k) {
+    const b = queries.length / this.dim;
+    if (!Number.isInteger(b) || b < 1) {
+      throw new Error(`GpuIndex.searchBatchAsync: queries.length (${queries.length}) must be a multiple of dim (${this.dim})`);
+    }
+    const hQueries = this.addon.loadMatrixGpu(queries, b, this.dim);
+    const indices = new Uint32Array(b * k);
+    const scores = new Float32Array(b * k);
+    try {
+      await this.addon.searchHandleAsync(hQueries, this.hCorpus, indices, scores);
+    } finally {
+      this.addon.releaseMatrixGpu(hQueries);
+    }
+    return { indices, scores, batch: b, k };
+  }
+
   close() {
     this.addon.releaseMatrixGpu(this.hCorpus);
   }

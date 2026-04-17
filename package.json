@@ -18,6 +18,8 @@
     "test": "node examples/matmul/test.js && node examples/simd-search/test.js && node examples/stats/test.js && node examples/image/test.js && node examples/wyhash/test.js"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.1.0",
+    "@qkstat/embed": "file:packages/embed",
     "@qkstat/rag": "file:packages/rag",
     "hnswlib-node": "^3.0.0",
     "napi-mojo": "^0.3.0",

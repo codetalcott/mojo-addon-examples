@@ -1,11 +1,11 @@
-// spike/reference.js — generate ground-truth embeddings for correctness gate F4.
+// packages/embed/reference.js — generate ground-truth embeddings for correctness gate F4.
 //
 // Uses @huggingface/transformers (v4+) on CPU to embed a 100-sentence sanity
 // set. Runs the same pipeline (tokenize → model → mean-pool → L2-normalize)
 // that MAX is expected to match in Mojo. Output goes to fixtures/ground-truth.bin;
-// Day 8's correctness test loads it and compares cosine similarity.
+// the correctness test loads it and compares cosine similarity.
 //
-// Run once on M4: node spike/reference.js
+// Run once on M4: node packages/embed/reference.js
 // Re-run only if the sanity set or the model revision changes.
 
 const fs = require('fs');

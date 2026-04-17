@@ -45,8 +45,8 @@
 #   --help
 #
 # Example:
-#   scripts/runpod-launch.sh --capture-to docs/spike-bench-h100-day5.txt -- \
-#     "node spike/bench.js"
+#   scripts/runpod-launch.sh --capture-to docs/bench-embed-h100.txt -- \
+#     "node packages/embed/bench.js"
 
 set -euo pipefail
 

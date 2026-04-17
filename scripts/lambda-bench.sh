@@ -34,8 +34,8 @@
 #   --help                   Show this text
 #
 # Example:
-#   scripts/lambda-bench.sh --capture-to docs/spike-bench-h100-day5.txt -- \
-#     "node spike/bench.js"
+#   scripts/lambda-bench.sh --capture-to docs/bench-embed-h100.txt -- \
+#     "node packages/embed/bench.js"
 
 set -euo pipefail
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build script for the embedding-kernel spike.
-# Compiles spike/src/lib.mojo into spike/build/embed.node.
+# Build script for @qkstat/embed.
+# Compiles packages/embed/src/lib.mojo into packages/embed/build/embed.node.
 # Mirrors packages/rag/build.sh — same pixi env, same napi-mojo framework.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 NAPI_SRC="$ROOT_DIR/node_modules/napi-mojo/src"
 
 mkdir -p "$SCRIPT_DIR/build"
@@ -26,8 +26,8 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
     MCPU_FLAG="--mcpu haswell"
 fi
 
-ACCEL_FLAG="${SPIKE_EMBED_ACCEL-}"
-if [ -z "${SPIKE_EMBED_ACCEL+x}" ]; then
+ACCEL_FLAG="${EMBED_ACCEL-}"
+if [ -z "${EMBED_ACCEL+x}" ]; then
     if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         ACCEL_FLAG="--target-accelerator metal:4"
     elif [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
@@ -43,4 +43,4 @@ mojo build --emit shared-lib ${MCPU_FLAG} ${ACCEL_FLAG} \
 
 mv "$SCRIPT_DIR/build/libembed.${LIB_EXT}" "$SCRIPT_DIR/build/embed.node"
 
-echo "Build complete: spike/build/embed.node"
+echo "Build complete: packages/embed/build/embed.node"

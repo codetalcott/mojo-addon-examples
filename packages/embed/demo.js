@@ -1,13 +1,13 @@
-// spike/demo.js — Day 4 end-to-end demo.
+// packages/embed/demo.js — end-to-end demo.
 //
-// spike/embed.node (MAX on H100 via Python interop) embeds 1000 docs,
-// packages/rag's GpuIndex does exact cosine search, 10 queries run,
+// @qkstat/embed (MAX on H100 via Python interop) embeds 1000 docs,
+// @qkstat/rag's GpuIndex does exact cosine search, queries run,
 // accuracy + latency reported.
 
 const path = require('path');
 const { tokenize } = require('./tokenize');
 const { buildCorpus, buildQueries } = require('./corpus');
-const { GpuIndex } = require('../packages/rag/lib/GpuIndex');
+const { GpuIndex } = require('../rag/lib/GpuIndex');
 
 const EMBED_DIM = 384;
 const K = 10;
@@ -22,7 +22,7 @@ async function embedBatch(addon, docs) {
 async function main() {
   const addon = require(path.join(__dirname, 'build', 'embed.node'));
   if (typeof addon.embedTokens !== 'function') {
-    throw new Error('embed.node missing embedTokens — run spike/build.sh');
+    throw new Error('embed.node missing embedTokens — run packages/embed/build.sh');
   }
 
   console.log('building corpus (5 clusters × 200 = 1000 docs)...');
@@ -98,7 +98,7 @@ async function main() {
   const pct = (100 * totalHits / (queries.length * K)).toFixed(1);
 
   console.log('\n==========================');
-  console.log('SUMMARY — spike (MAX on H100 + packages/rag exact search)');
+  console.log('SUMMARY — @qkstat/embed (MAX on H100 + @qkstat/rag exact search)');
   console.log('==========================');
   console.log(`corpus: ${docs.length} docs, ${clusterNames.length} clusters`);
   console.log(`corpus embed throughput: ${(docs.length * 1000 / embedMs).toFixed(0)} docs/sec  (${embedMs.toFixed(0)}ms total)`);

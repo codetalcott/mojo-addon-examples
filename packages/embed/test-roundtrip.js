@@ -1,9 +1,9 @@
-// spike/test-roundtrip.js — Day 3 end-to-end correctness test.
+// packages/embed/test-roundtrip.js — end-to-end correctness test.
 //
 // Flow: tokenize sanity set in JS (WordPiece via @huggingface/transformers)
 //   → call embedTokens() N-API → Mojo → Python (embed.py) → MAX on GPU
 //   → embeddings back to JS → compare cosine similarity against
-//     fixtures/ground-truth.bin from spike/reference.js.
+//     fixtures/ground-truth.bin from packages/embed/reference.js.
 //
 // PASS (Gate F4): cosine similarity ≥ 0.995 for every sentence in the set.
 
@@ -19,7 +19,7 @@ function loadGroundTruth() {
   const p = path.join(__dirname, 'fixtures', 'ground-truth.bin');
   if (!fs.existsSync(p)) {
     throw new Error(
-      `${p} missing — run: node spike/reference.js (once, on M4 is fine — CPU)`,
+      `${p} missing — run: node packages/embed/reference.js (once, on M4 is fine — CPU)`,
     );
   }
   const buf = fs.readFileSync(p);
@@ -42,7 +42,7 @@ function loadGroundTruth() {
 
 function loadSanitySet() {
   const p = path.join(__dirname, 'fixtures', 'sanity-set.txt');
-  if (!fs.existsSync(p)) throw new Error(`${p} missing — run spike/reference.js`);
+  if (!fs.existsSync(p)) throw new Error(`${p} missing — run packages/embed/reference.js`);
   return fs.readFileSync(p, 'utf8').split('\n').filter(Boolean);
 }
 

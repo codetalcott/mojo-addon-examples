@@ -286,13 +286,13 @@ node examples/matmul/matmul_rag.js --fixture=msmarco-10k --full
 
 Phase 3d primitives live in [`packages/rag/`](packages/rag/) as a sibling Node.js package — `v0.1.0-pre`, distributed separately from the root examples. Four GPU primitives (`loadMatrixGpu`, `matmulHandle`, `searchHandle`, `releaseMatrixGpu`) plus a thin `GpuIndex` helper. See [`packages/rag/README.md`](packages/rag/README.md).
 
-## Embedding-Kernel Spike — local GPU `embed + search` from Node
+## `@qkstat/embed` — local GPU `embed + search` from Node
 
-A 2-week spike (completed in 2 days) testing whether MiniLM-L6-v2 can be loaded and run on H100 via MAX from inside a Node.js N-API addon, fused with `packages/rag`'s search path. Lives in [`spike/`](spike/) as an isolated workspace.
+MiniLM-L6-v2 embeddings on H100 via MAX from inside a Node.js N-API addon, composable with `packages/rag`'s search path. Productized from a 2-day spike (GO verdict 2026-04-17); lives at [`packages/embed/`](packages/embed/).
 
-**Result: GO.** All five gates passed. End-to-end query (tokenize + embed + search against 1k corpus + top-10) on H100:
+**All five spike gates passed.** End-to-end query (tokenize + embed + search against 1k corpus + top-10) on H100:
 
-| | Spike (MAX H100 + packages/rag exact) | Reference (ONNX CPU + hnswlib ef=100) |
+| | `@qkstat/embed` (MAX H100) + `@qkstat/rag` exact | Reference (ONNX CPU + hnswlib ef=100) |
 |---|---|---|
 | Per-query total (batch-1 seq-32) | **1.44 ms p50** | 3.13 ms p50 |
 | Corpus embed throughput (warm) | **18,448 docs/sec** | 143 docs/sec |
@@ -300,9 +300,9 @@ A 2-week spike (completed in 2 days) testing whether MiniLM-L6-v2 can be loaded 
 
 ~2× faster per query; ~130× faster for bulk corpus indexing. Correctness vs. the `@huggingface/transformers` CPU reference is **0.99999 min cosine** across 100 sanity sentences.
 
-The spike validates the "kernel-factory" thesis from the portfolio plan — the same Mojo + napi-mojo delivery mechanism composes two addons (`spike/embed.node` + `packages/rag/build/rag.node`) cleanly in one Node process with separate CUDA contexts.
+This validates the "kernel-factory" thesis from the portfolio plan — the same Mojo + napi-mojo delivery mechanism composes two addons (`packages/embed/build/embed.node` + `packages/rag/build/rag.node`) cleanly in one Node process with separate CUDA contexts.
 
-See [`spike/findings.md`](spike/findings.md) for the day-by-day execution log and [`ideas/embedding-kernel-spike-writeup.md`](../../ideas/embedding-kernel-spike-writeup.md) for the GO/NO-GO decision artifact.
+See [`docs/embedding-kernel-spike-findings.md`](docs/embedding-kernel-spike-findings.md) for the day-by-day execution log and [`ideas/embedding-kernel-spike-writeup.md`](../../ideas/embedding-kernel-spike-writeup.md) for the GO/NO-GO decision artifact.
 
 ## Pod-side infrastructure
 

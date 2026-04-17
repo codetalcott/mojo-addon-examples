@@ -118,6 +118,23 @@ function writeFixture(outPath, vectors, n, d) {
   console.log(`  wrote ${outPath} (${(buf.length / 1e6).toFixed(2)} MB)`);
 }
 
+function writeJsonl(outPath, texts) {
+  // One text per line, JSON-encoded so embedded newlines / quotes survive
+  // a naive `.split('\n')` loader. Matches the shape packages/embed/bench.js
+  // expects for the tokenize→embed→search pipeline.
+  const stream = fs.createWriteStream(outPath);
+  for (const t of texts) stream.write(JSON.stringify(t) + '\n');
+  stream.end();
+  return new Promise((resolve, reject) => {
+    stream.on('finish', () => {
+      const { size } = fs.statSync(outPath);
+      console.log(`  wrote ${outPath} (${(size / 1e6).toFixed(2)} MB, ${texts.length} lines)`);
+      resolve();
+    });
+    stream.on('error', reject);
+  });
+}
+
 async function main() {
   await fs.promises.mkdir(OUT_DIR, { recursive: true });
   await fs.promises.mkdir(CACHE_DIR, { recursive: true });
@@ -131,6 +148,10 @@ async function main() {
   console.log(`   passages: ${passages.length}, queries: ${queries.length}`);
   if (passages.length < N) throw new Error(`only got ${passages.length} passages, need ${N}`);
   if (queries.length < Q) throw new Error(`only got ${queries.length} queries, need ${Q}`);
+
+  console.log('1b) writing raw-text .jsonl for the embed bench');
+  await writeJsonl(path.join(OUT_DIR, `${name}-corpus.jsonl`), passages);
+  await writeJsonl(path.join(OUT_DIR, `${name}-queries.jsonl`), queries);
 
   console.log(`2) loading ${MODEL} (first run downloads ~25 MB of weights)`);
   const { pipeline } = await import('@xenova/transformers');
