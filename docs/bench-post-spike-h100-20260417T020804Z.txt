@@ -1,0 +1,138 @@
+# runpod-launch.sh
+# pod: bmtdatv2rcrmib  ssh: 216.243.220.227:11513  gpu: NVIDIA H100 80GB HBM3  cloud: SECURE
+# command: cd /workspace/mojo-addon-examples && git fetch origin && git reset --hard origin/spike/embedding-kernel && pixi install 2>&1 | tail -3 && pixi run npm install 2>&1 | tail -5 && echo === BUILD packages/rag === && pixi run bash packages/rag/build.sh 2>&1 | tail -3 && echo === BUILD packages/embed === && pixi run bash packages/embed/build.sh 2>&1 | tail -3 && echo === G1 prep: reference.js CPU ground-truth === && pixi run node packages/embed/reference.js 2>&1 | tail -5 && echo === GATE G1: test-roundtrip.js === && pixi run node packages/embed/test-roundtrip.js && echo === MS-MARCO fixture build === && pixi run node scripts/build-msmarco-fixture.js --n=10000 --queries=200 2>&1 | tail -10 && echo === GATE G3: MS-MARCO bench === && pixi run node packages/embed/bench.js && echo === GATE G2 bonus on H100: async-load === && pixi run node packages/rag/tests/async-load.js
+# started: 2026-04-17T02:08:20Z
+---
+From https://github.com/codetalcott/mojo-addon-examples
+   4d7543f..28d111c  spike/embedding-kernel -> origin/spike/embedding-kernel
+HEAD is now at 4d7543f post-spike: promote embed kernel + async N-API + MS-MARCO bench
+Reset branch 'spike/embedding-kernel'
+Branch 'spike/embedding-kernel' set up to track remote branch 'spike/embedding-kernel' from 'origin'.
+Your branch is up to date with 'origin/spike/embedding-kernel'.
+HEAD is now at 28d111c rag: restore unsafe_ptr().value() for Mojo 2026041520+
+Ready. cd /workspace/mojo-addon-examples (on spike/embedding-kernel at 28d111c)
+=== host 4ccbe83870b2 === Fri Apr 17 02:08:24 UTC 2026 ===
+NVIDIA H100 80GB HBM3, 81559 MiB
+=== command: cd /workspace/mojo-addon-examples && git fetch origin && git reset --hard origin/spike/embedding-kernel && pixi install 2>&1 | tail -3 && pixi run npm install 2>&1 | tail -5 && echo === BUILD packages/rag === && pixi run bash packages/rag/build.sh 2>&1 | tail -3 && echo === BUILD packages/embed === && pixi run bash packages/embed/build.sh 2>&1 | tail -3 && echo === G1 prep: reference.js CPU ground-truth === && pixi run node packages/embed/reference.js 2>&1 | tail -5 && echo === GATE G1: test-roundtrip.js === && pixi run node packages/embed/test-roundtrip.js && echo === MS-MARCO fixture build === && pixi run node scripts/build-msmarco-fixture.js --n=10000 --queries=200 2>&1 | tail -10 && echo === GATE G3: MS-MARCO bench === && pixi run node packages/embed/bench.js && echo === GATE G2 bonus on H100: async-load === && pixi run node packages/rag/tests/async-load.js ===
+HEAD is now at 28d111c rag: restore unsafe_ptr().value() for Mojo 2026041520+
+✔ The default environment has been installed.
+npm notice
+npm notice New minor version of npm available! 11.11.1 -> 11.12.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.12.1
+npm notice To update run: npm install -g npm@11.12.1
+npm notice
+=== BUILD packages/rag ===
+        def(NapiEnv, NapiValue, OpaquePointer[MutAnyOrigin]) abi("C") -> NapiStatus
+        ^
+Build complete: packages/rag/build/rag.node
+=== BUILD packages/embed ===
+        def(NapiEnv, OpaquePointer[MutAnyOrigin]) abi("C") -> NapiStatus
+        ^
+Build complete: packages/embed/build/embed.node
+=== G1 prep: reference.js CPU ground-truth ===
+loading Xenova/all-MiniLM-L6-v2 on CPU…
+embedding 100 sentences…
+  done (695ms, 7.0ms/sentence)
+wrote /workspace/mojo-addon-examples/packages/embed/fixtures/ground-truth.bin (100 × 384 float32)
+=== GATE G1: test-roundtrip.js ===
+sanity set: 100 sentences, ground-truth shape: (100, 384)
+tokenizing...
+  tokens shape: [100, 14]  (batch=100, seq_len=14)
+calling embedTokens() — this will spin up MAX on first call (expect ~10-30s cold start)
+PyTorch was not found. Models won't be available and only tokenizers, configuration and file/data utilities can be used.
+2026-04-17 02:09:43,329 INFO device: Device(type=gpu,id=0)
+2026-04-17 02:09:43,329 INFO fetching sentence-transformers/all-MiniLM-L6-v2 (cache: /workspace/persist/model-cache)
+2026-04-17 02:09:43,517 INFO HTTP Request: GET https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2/revision/main "HTTP/1.1 200 OK"
+Fetching 30 files:   0%|          | 0/30 [00:00<?, ?it/s]Fetching 30 files: 100%|██████████| 30/30 [00:00<00:00, 2534.07it/s]
+2026-04-17 02:09:43,986 INFO loaded 104 weight tensors from safetensors
+2026-04-17 02:09:43,987 INFO after adapter: 101 tensors
+2026-04-17 02:09:44,041 INFO building graph (vocab=30522, hidden=384)
+2026-04-17 02:09:44,460 INFO compiling with InferenceSession.load...
+2026-04-17 02:09:45,196 INFO ready  (compile: 0.7s, total init: 2.6s)
+  first-call latency: 37510ms (includes model load + compile)
+correctness (vs @huggingface/transformers CPU reference):
+  mean cosine: 0.999998
+  min cosine:  0.999990  (sentence 36: "Comments explain why, not what.")
+
+warming up (5 iters)...
+warm latency (batch-100, seq_len-14): 2.91ms/op
+
+✅ GATE F4 PASS: min cosine 1.0000 ≥ 0.995
+   (cold: 37510ms, warm: 2.91ms/op over 20 iters)
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/python3.14/multiprocessing/resource_tracker.py:396: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-zrkmtn68'}
+  warnings.warn(
+=== MS-MARCO fixture build ===
+  wrote /workspace/mojo-addon-examples/examples/rag-demo/fixtures/msmarco-10k-queries.jsonl (0.01 MB, 200 lines)
+2) loading Xenova/all-MiniLM-L6-v2 (first run downloads ~25 MB of weights)
+3) embedding passages (batch=32)
+   passages: 32/10000 (53.3/s)   passages: 64/10000 (39.3/s)   passages: 96/10000 (42.8/s)   passages: 128/10000 (49.2/s)   passages: 160/10000 (51.1/s)   passages: 192/10000 (51.2/s)   passages: 224/10000 (52.9/s)   passages: 256/10000 (57.3/s)   passages: 288/10000 (58.9/s)   passages: 320/10000 (57.8/s)   passages: 352/10000 (58.1/s)   passages: 384/10000 (55.5/s)   passages: 416/10000 (55.9/s)   passages: 448/10000 (56.6/s)   passages: 480/10000 (55.9/s)   passages: 512/10000 (56.8/s)   passages: 544/10000 (56.9/s)   passages: 576/10000 (57.7/s)   passages: 608/10000 (58.5/s)   passages: 640/10000 (58.5/s)   passages: 672/10000 (58.6/s)   passages: 704/10000 (57.1/s)   passages: 736/10000 (57.8/s)   passages: 768/10000 (58.5/s)   passages: 800/10000 (59.3/s)   passages: 832/10000 (59.8/s)   passages: 864/10000 (60.3/s)   passages: 896/10000 (60.5/s)   passages: 928/10000 (61.0/s)   passages: 960/10000 (61.5/s)   passages: 992/10000 (62.0/s)   passages: 1024/10000 (62.0/s)   passages: 1056/10000 (61.6/s)   passages: 1088/10000 (61.7/s)   passages: 1120/10000 (61.7/s)   passages: 1152/10000 (61.8/s)   passages: 1184/10000 (61.9/s)   passages: 1216/10000 (62.0/s)   passages: 1248/10000 (61.2/s)   passages: 1280/10000 (60.4/s)   passages: 1312/10000 (59.6/s)   passages: 1344/10000 (60.0/s)   passages: 1376/10000 (59.7/s)   passages: 1408/10000 (57.9/s)   passages: 1440/10000 (57.6/s)   passages: 1472/10000 (57.3/s)   passages: 1504/10000 (56.8/s)   passages: 1536/10000 (57.1/s)   passages: 1568/10000 (57.2/s)   passages: 1600/10000 (57.3/s)   passages: 1632/10000 (57.4/s)   passages: 1664/10000 (57.5/s)   passages: 1696/10000 (56.6/s)   passages: 1728/10000 (56.8/s)   passages: 1760/10000 (56.9/s)   passages: 1792/10000 (57.0/s)   passages: 1824/10000 (56.9/s)   passages: 1856/10000 (56.6/s)   passages: 1888/10000 (56.9/s)   passages: 1920/10000 (56.6/s)   passages: 1952/10000 (56.5/s)   passages: 1984/10000 (56.7/s)   passages: 2016/10000 (56.3/s)   passages: 2048/10000 (55.7/s)   passages: 2080/10000 (55.9/s)   passages: 2112/10000 (55.7/s)   passages: 2144/10000 (55.8/s)   passages: 2176/10000 (55.6/s)   passages: 2208/10000 (55.9/s)   passages: 2240/10000 (56.0/s)   passages: 2272/10000 (56.2/s)   passages: 2304/10000 (56.3/s)   passages: 2336/10000 (56.4/s)   passages: 2368/10000 (56.1/s)   passages: 2400/10000 (55.6/s)   passages: 2432/10000 (55.9/s)   passages: 2464/10000 (56.1/s)   passages: 2496/10000 (56.3/s)   passages: 2528/10000 (56.2/s)   passages: 2560/10000 (55.9/s)   passages: 2592/10000 (55.8/s)   passages: 2624/10000 (55.6/s)   passages: 2656/10000 (55.8/s)   passages: 2688/10000 (55.7/s)   passages: 2720/10000 (55.7/s)   passages: 2752/10000 (55.8/s)   passages: 2784/10000 (55.6/s)   passages: 2816/10000 (55.9/s)   passages: 2848/10000 (56.0/s)   passages: 2880/10000 (56.0/s)   passages: 2912/10000 (56.2/s)   passages: 2944/10000 (56.1/s)   passages: 2976/10000 (56.3/s)   passages: 3008/10000 (56.3/s)   passages: 3040/10000 (56.5/s)   passages: 3072/10000 (56.3/s)   passages: 3104/10000 (56.4/s)   passages: 3136/10000 (56.5/s)   passages: 3168/10000 (56.7/s)   passages: 3200/10000 (56.7/s)   passages: 3232/10000 (56.9/s)   passages: 3264/10000 (56.8/s)   passages: 3296/10000 (56.9/s)   passages: 3328/10000 (56.9/s)   passages: 3360/10000 (57.0/s)   passages: 3392/10000 (57.1/s)   passages: 3424/10000 (57.1/s)   passages: 3456/10000 (57.3/s)   passages: 3488/10000 (57.3/s)   passages: 3520/10000 (57.5/s)   passages: 3552/10000 (57.4/s)   passages: 3584/10000 (57.3/s)   passages: 3616/10000 (57.1/s)   passages: 3648/10000 (57.3/s)   passages: 3680/10000 (57.3/s)   passages: 3712/10000 (57.4/s)   passages: 3744/10000 (57.4/s)   passages: 3776/10000 (57.3/s)   passages: 3808/10000 (57.4/s)   passages: 3840/10000 (57.6/s)   passages: 3872/10000 (57.5/s)   passages: 3904/10000 (57.6/s)   passages: 3936/10000 (57.6/s)   passages: 3968/10000 (57.7/s)   passages: 4000/10000 (57.8/s)   passages: 4032/10000 (58.0/s)   passages: 4064/10000 (58.1/s)   passages: 4096/10000 (58.1/s)   passages: 4128/10000 (58.3/s)   passages: 4160/10000 (58.4/s)   passages: 4192/10000 (58.5/s)   passages: 4224/10000 (58.7/s)   passages: 4256/10000 (58.6/s)   passages: 4288/10000 (58.5/s)   passages: 4320/10000 (58.6/s)   passages: 4352/10000 (58.5/s)   passages: 4384/10000 (58.5/s)   passages: 4416/10000 (58.4/s)   passages: 4448/10000 (58.4/s)   passages: 4480/10000 (58.1/s)   passages: 4512/10000 (58.2/s)   passages: 4544/10000 (58.2/s)   passages: 4576/10000 (57.9/s)   passages: 4608/10000 (57.9/s)   passages: 4640/10000 (58.0/s)   passages: 4672/10000 (58.0/s)   passages: 4704/10000 (57.8/s)   passages: 4736/10000 (57.6/s)   passages: 4768/10000 (57.6/s)   passages: 4800/10000 (57.6/s)   passages: 4832/10000 (57.6/s)   passages: 4864/10000 (57.5/s)   passages: 4896/10000 (57.7/s)   passages: 4928/10000 (57.7/s)   passages: 4960/10000 (57.7/s)   passages: 4992/10000 (57.9/s)   passages: 5024/10000 (57.9/s)   passages: 5056/10000 (58.0/s)   passages: 5088/10000 (58.1/s)   passages: 5120/10000 (58.2/s)   passages: 5152/10000 (58.2/s)   passages: 5184/10000 (58.2/s)   passages: 5216/10000 (58.3/s)   passages: 5248/10000 (58.1/s)   passages: 5280/10000 (58.2/s)   passages: 5312/10000 (58.1/s)   passages: 5344/10000 (58.2/s)   passages: 5376/10000 (58.3/s)   passages: 5408/10000 (58.1/s)   passages: 5440/10000 (58.2/s)   passages: 5472/10000 (58.2/s)   passages: 5504/10000 (58.1/s)   passages: 5536/10000 (58.0/s)   passages: 5568/10000 (57.6/s)   passages: 5600/10000 (57.7/s)   passages: 5632/10000 (57.8/s)   passages: 5664/10000 (57.9/s)   passages: 5696/10000 (57.8/s)   passages: 5728/10000 (57.8/s)   passages: 5760/10000 (57.8/s)   passages: 5792/10000 (57.5/s)   passages: 5824/10000 (57.6/s)   passages: 5856/10000 (57.6/s)   passages: 5888/10000 (57.7/s)   passages: 5920/10000 (57.7/s)   passages: 5952/10000 (57.7/s)   passages: 5984/10000 (57.8/s)   passages: 6016/10000 (57.8/s)   passages: 6048/10000 (57.8/s)   passages: 6080/10000 (57.8/s)   passages: 6112/10000 (57.9/s)   passages: 6144/10000 (57.9/s)   passages: 6176/10000 (57.9/s)   passages: 6208/10000 (57.9/s)   passages: 6240/10000 (58.0/s)   passages: 6272/10000 (58.1/s)   passages: 6304/10000 (57.9/s)   passages: 6336/10000 (57.8/s)   passages: 6368/10000 (57.7/s)   passages: 6400/10000 (57.7/s)   passages: 6432/10000 (57.6/s)   passages: 6464/10000 (57.7/s)   passages: 6496/10000 (57.7/s)   passages: 6528/10000 (57.7/s)   passages: 6560/10000 (57.5/s)   passages: 6592/10000 (57.6/s)   passages: 6624/10000 (57.7/s)   passages: 6656/10000 (57.7/s)   passages: 6688/10000 (57.6/s)   passages: 6720/10000 (57.6/s)   passages: 6752/10000 (57.5/s)   passages: 6784/10000 (57.3/s)   passages: 6816/10000 (57.4/s)   passages: 6848/10000 (57.3/s)   passages: 6880/10000 (57.4/s)   passages: 6912/10000 (57.4/s)   passages: 6944/10000 (57.4/s)   passages: 6976/10000 (57.4/s)   passages: 7008/10000 (57.5/s)   passages: 7040/10000 (57.5/s)   passages: 7072/10000 (57.6/s)   passages: 7104/10000 (57.5/s)   passages: 7136/10000 (57.6/s)   passages: 7168/10000 (57.3/s)   passages: 7200/10000 (57.3/s)   passages: 7232/10000 (57.2/s)   passages: 7264/10000 (57.2/s)   passages: 7296/10000 (57.2/s)   passages: 7328/10000 (57.3/s)   passages: 7360/10000 (57.4/s)   passages: 7392/10000 (57.4/s)   passages: 7424/10000 (57.3/s)   passages: 7456/10000 (57.3/s)   passages: 7488/10000 (57.3/s)   passages: 7520/10000 (57.4/s)   passages: 7552/10000 (57.3/s)   passages: 7584/10000 (57.3/s)   passages: 7616/10000 (57.3/s)   passages: 7648/10000 (57.4/s)   passages: 7680/10000 (57.4/s)   passages: 7712/10000 (57.5/s)   passages: 7744/10000 (57.5/s)   passages: 7776/10000 (57.5/s)   passages: 7808/10000 (57.5/s)   passages: 7840/10000 (57.5/s)   passages: 7872/10000 (57.6/s)   passages: 7904/10000 (57.7/s)   passages: 7936/10000 (57.7/s)   passages: 7968/10000 (57.7/s)   passages: 8000/10000 (57.8/s)   passages: 8032/10000 (57.7/s)   passages: 8064/10000 (57.8/s)   passages: 8096/10000 (57.7/s)   passages: 8128/10000 (57.8/s)   passages: 8160/10000 (57.8/s)   passages: 8192/10000 (57.8/s)   passages: 8224/10000 (57.9/s)   passages: 8256/10000 (57.9/s)   passages: 8288/10000 (57.9/s)   passages: 8320/10000 (57.9/s)   passages: 8352/10000 (58.0/s)   passages: 8384/10000 (58.1/s)   passages: 8416/10000 (58.1/s)   passages: 8448/10000 (58.1/s)   passages: 8480/10000 (58.1/s)   passages: 8512/10000 (58.0/s)   passages: 8544/10000 (58.1/s)   passages: 8576/10000 (58.0/s)   passages: 8608/10000 (58.0/s)   passages: 8640/10000 (58.1/s)   passages: 8672/10000 (58.0/s)   passages: 8704/10000 (58.0/s)   passages: 8736/10000 (58.1/s)   passages: 8768/10000 (58.2/s)   passages: 8800/10000 (58.1/s)   passages: 8832/10000 (58.2/s)   passages: 8864/10000 (58.2/s)   passages: 8896/10000 (58.2/s)   passages: 8928/10000 (58.1/s)   passages: 8960/10000 (58.2/s)   passages: 8992/10000 (58.2/s)   passages: 9024/10000 (58.2/s)   passages: 9056/10000 (58.2/s)   passages: 9088/10000 (58.3/s)   passages: 9120/10000 (58.2/s)   passages: 9152/10000 (58.2/s)   passages: 9184/10000 (58.1/s)   passages: 9216/10000 (58.2/s)   passages: 9248/10000 (58.1/s)   passages: 9280/10000 (58.1/s)   passages: 9312/10000 (58.2/s)   passages: 9344/10000 (58.2/s)   passages: 9376/10000 (58.1/s)   passages: 9408/10000 (58.1/s)   passages: 9440/10000 (58.1/s)   passages: 9472/10000 (58.1/s)   passages: 9504/10000 (58.2/s)   passages: 9536/10000 (58.2/s)   passages: 9568/10000 (58.2/s)   passages: 9600/10000 (58.2/s)   passages: 9632/10000 (58.2/s)   passages: 9664/10000 (57.9/s)   passages: 9696/10000 (57.9/s)   passages: 9728/10000 (57.9/s)   passages: 9760/10000 (57.8/s)   passages: 9792/10000 (57.7/s)   passages: 9824/10000 (57.8/s)   passages: 9856/10000 (57.8/s)   passages: 9888/10000 (57.8/s)   passages: 9920/10000 (57.8/s)   passages: 9952/10000 (57.8/s)   passages: 9984/10000 (57.8/s)   passages: 10000/10000 (57.8/s)
+4) embedding queries
+   queries: 32/200 (163.3/s)   queries: 64/200 (231.0/s)   queries: 96/200 (198.8/s)   queries: 128/200 (189.1/s)   queries: 160/200 (182.0/s)   queries: 192/200 (181.0/s)   queries: 200/200 (185.5/s)
+5) writing fixtures
+  wrote /workspace/mojo-addon-examples/examples/rag-demo/fixtures/msmarco-10k-corpus.bin (15.36 MB)
+  wrote /workspace/mojo-addon-examples/examples/rag-demo/fixtures/msmarco-10k-queries.bin (0.31 MB)
+done
+=== GATE G3: MS-MARCO bench ===
+fixture: 10000 passages, 200 queries
+packages/embed bench (MS-MARCO) — warmup=10 iters, measure=50 iters
+
+==================================================
+CORPUS 1000 MS-MARCO passages
+==================================================
+
+[1] Corpus embedding (batch-64):
+  embedding 1000 passages in batch-64 (first batch = JIT)...
+PyTorch was not found. Models won't be available and only tokenizers, configuration and file/data utilities can be used.
+2026-04-17 02:20:31,617 INFO device: Device(type=gpu,id=0)
+2026-04-17 02:20:31,617 INFO fetching sentence-transformers/all-MiniLM-L6-v2 (cache: /workspace/persist/model-cache)
+2026-04-17 02:20:31,831 INFO HTTP Request: GET https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2/revision/main "HTTP/1.1 200 OK"
+Fetching 30 files:   0%|          | 0/30 [00:00<?, ?it/s]Fetching 30 files: 100%|██████████| 30/30 [00:00<00:00, 1829.82it/s]
+2026-04-17 02:20:32,142 INFO loaded 104 weight tensors from safetensors
+2026-04-17 02:20:32,142 INFO after adapter: 101 tensors
+2026-04-17 02:20:32,205 INFO building graph (vocab=30522, hidden=384)
+2026-04-17 02:20:32,426 INFO compiling with InferenceSession.load...
+2026-04-17 02:20:32,889 INFO ready  (compile: 0.5s, total init: 2.1s)
+  1000 passages                cold_first_batch=31104ms  warm_per_batch_p50=14.23ms  warm_throughput=3119 docs/sec
+
+[2] Building GpuIndex...
+  GpuIndex build: 135.4ms (H2D of 1.5 MB)
+
+[3] Query latencies (WARM, p50 over 50 iters):
+  batch-1                      seq= 16 tok= 0.05ms emb= 1.24ms search= 0.078ms total= 1.36ms (p95=1.65ms p99=1.89ms)
+  batch-8                      seq= 37 tok= 0.44ms emb= 1.96ms search= 0.580ms total= 2.99ms (p95=3.12ms p99=4.32ms)
+  batch-64                     seq= 37 tok= 1.15ms emb= 2.51ms search= 3.282ms total= 6.95ms (p95=7.64ms p99=8.08ms)
+
+==================================================
+CORPUS 10000 MS-MARCO passages
+==================================================
+
+[1] Corpus embedding (batch-64):
+  embedding 10000 passages in batch-64 (first batch = JIT)...
+  10000 passages               cold_first_batch=15ms  warm_per_batch_p50=12.42ms  warm_throughput=5137 docs/sec
+
+[2] Building GpuIndex...
+  GpuIndex build: 38.5ms (H2D of 15.4 MB)
+
+[3] Query latencies (WARM, p50 over 50 iters):
+  batch-1                      seq= 16 tok= 0.07ms emb= 1.40ms search= 0.134ms total= 1.64ms (p95=2.01ms p99=2.13ms)
+  batch-8                      seq= 37 tok= 0.42ms emb= 1.89ms search= 0.742ms total= 3.07ms (p95=3.43ms p99=4.96ms)
+  batch-64                     seq= 37 tok= 1.39ms emb= 2.54ms search= 4.175ms total= 8.15ms (p95=9.75ms p99=10.45ms)
+
+DONE
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/python3.14/multiprocessing/resource_tracker.py:396: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-1yknuslk'}
+  warnings.warn(
+=== GATE G2 bonus on H100: async-load ===
+corpus: N=10000 dim=384; concurrency=100; k=10
+warming up...
+
+--- async (100 concurrent searchAsync) ---
+wall: 6.0 ms
+event-loop:      min=9223372036854.78ms mean=NaNms p50=0.00ms p95=0.00ms p99=0.00ms max=0.00ms
+
+--- sync (100 serial search) ---
+wall: 6.1 ms
+event-loop:      min=9223372036854.78ms mean=NaNms p50=0.00ms p95=0.00ms p99=0.00ms max=0.00ms
+
+GATE G2 PASS: async event-loop p99 = 0.00 ms (limit 5 ms)
+---
+# finished: 2026-04-17T02:20:38Z

@@ -1,0 +1,76 @@
+# runpod-launch.sh
+# pod: t1h78p0u35fkwu  ssh: 216.243.220.227:19164  gpu: NVIDIA H100 80GB HBM3  cloud: SECURE
+# command: cd /workspace/mojo-addon-examples && git fetch origin && git reset --hard origin/spike/embedding-kernel &&    echo '=== building rag + spike ===' &&    pixi run bash packages/rag/build.sh 2>&1 | grep -E 'error:|Build complete' | tail -1 &&    pixi run bash spike/build.sh 2>&1 | grep -E 'error:|Build complete' | tail -1 &&    echo '' && echo '=== Day 5 bench ===' &&    pixi run node spike/bench.js
+# started: 2026-04-17T00:11:54Z
+---
+From https://github.com/codetalcott/mojo-addon-examples
+   095f126..4a8674e  spike/embedding-kernel -> origin/spike/embedding-kernel
+HEAD is now at 095f126 rag: fix .unsafe_ptr() against MAX 26.3+ — now returns Optional[UnsafePointer]
+Reset branch 'spike/embedding-kernel'
+Branch 'spike/embedding-kernel' set up to track remote branch 'spike/embedding-kernel' from 'origin'.
+Your branch is up to date with 'origin/spike/embedding-kernel'.
+HEAD is now at 4a8674e spike: Day 5 — warm-path bench with JIT separation + per-stage timers
+Ready. cd /workspace/mojo-addon-examples (on spike/embedding-kernel at 4a8674e)
+=== host 7b797f870b42 === Fri Apr 17 00:11:58 UTC 2026 ===
+NVIDIA H100 80GB HBM3, 81559 MiB
+=== command: cd /workspace/mojo-addon-examples && git fetch origin && git reset --hard origin/spike/embedding-kernel &&    echo '=== building rag + spike ===' &&    pixi run bash packages/rag/build.sh 2>&1 | grep -E 'error:|Build complete' | tail -1 &&    pixi run bash spike/build.sh 2>&1 | grep -E 'error:|Build complete' | tail -1 &&    echo '' && echo '=== Day 5 bench ===' &&    pixi run node spike/bench.js ===
+HEAD is now at 4a8674e spike: Day 5 — warm-path bench with JIT separation + per-stage timers
+=== building rag + spike ===
+Build complete: packages/rag/build/rag.node
+Build complete: spike/build/embed.node
+
+=== Day 5 bench ===
+spike bench  —  warmup=10 iters, measure=50 iters
+
+
+==================================================
+CORPUS 1000 docs
+==================================================
+
+[1] Corpus embedding (batch-64):
+  building 1000-doc corpus embeddings (warming up JIT)...
+PyTorch was not found. Models won't be available and only tokenizers, configuration and file/data utilities can be used.
+2026-04-17 00:12:37,969 INFO device: Device(type=gpu,id=0)
+2026-04-17 00:12:37,969 INFO fetching sentence-transformers/all-MiniLM-L6-v2 (cache: /workspace/persist/model-cache)
+2026-04-17 00:12:38,115 INFO HTTP Request: GET https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2/revision/main "HTTP/1.1 200 OK"
+Fetching 30 files:   0%|          | 0/30 [00:00<?, ?it/s]Fetching 30 files: 100%|██████████| 30/30 [00:00<00:00, 3457.03it/s]
+2026-04-17 00:12:38,366 INFO loaded 104 weight tensors from safetensors
+2026-04-17 00:12:38,367 INFO after adapter: 101 tensors
+2026-04-17 00:12:38,412 INFO building graph (vocab=30522, hidden=384)
+2026-04-17 00:12:38,558 INFO compiling with InferenceSession.load...
+2026-04-17 00:12:39,063 INFO ready  (compile: 0.5s, total init: 1.9s)
+  1000 docs              cold_first_batch=29647ms  warm_per_batch_p50=6.33ms  warm_throughput=6501 docs/sec
+
+[2] Building GpuIndex...
+  GpuIndex build: 158.9ms (H2D of 1.5 MB)
+
+[3] Query latencies (WARM, median over 50 iters):
+  batch-1  seq-32        tok= 0.06ms emb= 1.30ms search= 0.084ms total= 1.44ms (p95=2.13ms p99=2.30ms)
+  batch-1  seq-128       tok= 0.44ms emb= 2.05ms search= 0.171ms total= 2.68ms (p95=3.17ms p99=3.34ms)
+  batch-8  seq-32        tok= 1.04ms emb= 2.10ms search= 0.684ms total= 3.83ms (p95=4.55ms p99=4.63ms)
+  batch-64 seq-32        tok= 2.59ms emb= 2.73ms search= 3.332ms total= 8.64ms (p95=9.18ms p99=10.18ms)
+  batch-64 seq-128       tok= 7.94ms emb= 6.58ms search= 3.337ms total=17.88ms (p95=20.04ms p99=21.23ms)
+
+==================================================
+CORPUS 10000 docs
+==================================================
+
+[1] Corpus embedding (batch-64):
+  building 10000-doc corpus embeddings (warming up JIT)...
+  10000 docs             cold_first_batch=4ms  warm_per_batch_p50=3.39ms  warm_throughput=18448 docs/sec
+
+[2] Building GpuIndex...
+  GpuIndex build: 38.8ms (H2D of 15.4 MB)
+
+[3] Query latencies (WARM, median over 50 iters):
+  batch-1  seq-32        tok= 0.12ms emb= 1.50ms search= 0.158ms total= 1.81ms (p95=2.13ms p99=2.20ms)
+  batch-1  seq-128       tok= 0.53ms emb= 2.12ms search= 0.226ms total= 2.89ms (p95=3.08ms p99=4.78ms)
+  batch-8  seq-32        tok= 0.94ms emb= 2.05ms search= 1.066ms total= 4.03ms (p95=4.63ms p99=5.21ms)
+  batch-64 seq-32        tok= 2.38ms emb= 2.74ms search= 4.974ms total=10.85ms (p95=11.48ms p99=12.30ms)
+  batch-64 seq-128       tok= 7.86ms emb= 6.57ms search= 3.971ms total=18.67ms (p95=20.41ms p99=23.95ms)
+
+DONE
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/python3.14/multiprocessing/resource_tracker.py:396: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-fh772j_8'}
+  warnings.warn(
+---
+# finished: 2026-04-17T00:12:44Z

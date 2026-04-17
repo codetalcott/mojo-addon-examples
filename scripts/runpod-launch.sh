@@ -67,14 +67,16 @@ MAX_RUNTIME_HOURS=2
 CAPTURE=""
 DRY_RUN=0
 COMMAND=""
-VOLUME_ID="${RUNPOD_VOLUME_ID:-}"
-
-# Source API key if in dotfile.
-if [ -z "${RUNPOD_API_KEY:-}" ] && [ -f "$HOME/.config/runpod/env" ]; then
+# Source API key + volume ID from dotfile before reading them into vars.
+# (If we read RUNPOD_VOLUME_ID before sourcing, the env-file value never
+# reaches the script.)
+if [ -f "$HOME/.config/runpod/env" ]; then
   # shellcheck disable=SC1091
   source "$HOME/.config/runpod/env"
 fi
 : "${RUNPOD_API_KEY:?RUNPOD_API_KEY not set}"
+
+VOLUME_ID="${RUNPOD_VOLUME_ID:-}"
 
 API="https://api.runpod.io/graphql"
 

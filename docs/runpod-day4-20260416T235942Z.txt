@@ -1,0 +1,108 @@
+# runpod-launch.sh
+# pod: ipreis9znkgdm9  ssh: 216.243.220.227:10101  gpu: NVIDIA H100 80GB HBM3  cloud: SECURE
+# command: cd /workspace/mojo-addon-examples && git fetch origin && git reset --hard origin/spike/embedding-kernel &&    echo '=== JS deps ===' &&    pixi run npm install --silent 2>&1 | tail -1 && (cd spike && pixi run npm install --silent 2>&1 | tail -1) &&    echo '=== building rag ===' && pixi run bash packages/rag/build.sh 2>&1 | grep -E 'error:|Build complete' | tail -1 &&    echo '=== building spike ===' && pixi run bash spike/build.sh 2>&1 | grep -E 'error:|Build complete' | tail -1 &&    echo '' && echo '===== DEMO (spike, GPU) =====' &&    pixi run node spike/demo.js &&    echo '' && echo '===== DEMO-REFERENCE (CPU ONNX) =====' &&    pixi run node spike/demo-reference.js
+# started: 2026-04-17T00:00:14Z
+---
+From https://github.com/codetalcott/mojo-addon-examples
+   fbace60..095f126  spike/embedding-kernel -> origin/spike/embedding-kernel
+HEAD is now at fbace60 spike: Day 4 — end-to-end demo (spike GPU + packages/rag vs CPU reference)
+Reset branch 'spike/embedding-kernel'
+Branch 'spike/embedding-kernel' set up to track remote branch 'spike/embedding-kernel' from 'origin'.
+Your branch is up to date with 'origin/spike/embedding-kernel'.
+HEAD is now at 095f126 rag: fix .unsafe_ptr() against MAX 26.3+ — now returns Optional[UnsafePointer]
+Ready. cd /workspace/mojo-addon-examples (on spike/embedding-kernel at 095f126)
+=== host 0eb5c99a7ece === Fri Apr 17 00:00:18 UTC 2026 ===
+NVIDIA H100 80GB HBM3, 81559 MiB
+=== command: cd /workspace/mojo-addon-examples && git fetch origin && git reset --hard origin/spike/embedding-kernel &&    echo '=== JS deps ===' &&    pixi run npm install --silent 2>&1 | tail -1 && (cd spike && pixi run npm install --silent 2>&1 | tail -1) &&    echo '=== building rag ===' && pixi run bash packages/rag/build.sh 2>&1 | grep -E 'error:|Build complete' | tail -1 &&    echo '=== building spike ===' && pixi run bash spike/build.sh 2>&1 | grep -E 'error:|Build complete' | tail -1 &&    echo '' && echo '===== DEMO (spike, GPU) =====' &&    pixi run node spike/demo.js &&    echo '' && echo '===== DEMO-REFERENCE (CPU ONNX) =====' &&    pixi run node spike/demo-reference.js ===
+HEAD is now at 095f126 rag: fix .unsafe_ptr() against MAX 26.3+ — now returns Optional[UnsafePointer]
+=== JS deps ===
+=== building rag ===
+Build complete: packages/rag/build/rag.node
+=== building spike ===
+Build complete: spike/build/embed.node
+
+===== DEMO (spike, GPU) =====
+building corpus (5 clusters × 200 = 1000 docs)...
+
+embedding corpus in batches of 64...
+PyTorch was not found. Models won't be available and only tokenizers, configuration and file/data utilities can be used.
+2026-04-17 00:01:26,917 INFO device: Device(type=gpu,id=0)
+2026-04-17 00:01:26,918 INFO fetching sentence-transformers/all-MiniLM-L6-v2 (cache: /workspace/persist/model-cache)
+2026-04-17 00:01:27,257 INFO HTTP Request: GET https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2/revision/main "HTTP/1.1 200 OK"
+Fetching 30 files:   0%|          | 0/30 [00:00<?, ?it/s]Fetching 30 files: 100%|██████████| 30/30 [00:00<00:00, 2428.52it/s]
+2026-04-17 00:01:27,515 INFO loaded 104 weight tensors from safetensors
+2026-04-17 00:01:27,515 INFO after adapter: 101 tensors
+2026-04-17 00:01:27,560 INFO building graph (vocab=30522, hidden=384)
+2026-04-17 00:01:27,732 INFO compiling with InferenceSession.load...
+2026-04-17 00:01:28,226 INFO ready  (compile: 0.5s, total init: 2.1s)
+  first batch: batch=64, seq_len=14
+corpus embed time: 33753ms  (30 docs/sec)
+
+building GpuIndex (corpus → separate CUDA context for packages/rag)...
+GpuIndex build: 163.9ms
+
+running 10 queries (k=10)...
+
+  Q0 [cooking]: "I love to cook pasta oregano."
+    hits=10/10  embed=1.85ms  search=0.112ms
+    1. [cooking] score=1.0000 :: I love to cook pasta oregano.
+    2. [cooking] score=0.8689 :: I love to simmer pasta oregano.
+    3. [cooking] score=0.7191 :: I love to bake pasta rosemary.
+
+  Q1 [cooking]: "Roasting prepare brings out their sweetness."
+    hits=10/10  embed=1.76ms  search=0.112ms
+    1. [cooking] score=1.0000 :: Roasting prepare brings out their sweetness.
+    2. [cooking] score=1.0000 :: Roasting prepare brings out their sweetness.
+    3. [cooking] score=1.0000 :: Roasting prepare brings out their sweetness.
+
+  Q2 [programming]: "I spent the afternoon chasing down a race condition."
+    hits=10/10  embed=1.70ms  search=0.089ms
+    1. [programming] score=1.0000 :: I spent the afternoon chasing down a race condition.
+    2. [programming] score=1.0000 :: I spent the afternoon chasing down a race condition.
+    3. [programming] score=1.0000 :: I spent the afternoon chasing down a race condition.
+
+==========================
+SUMMARY — spike (MAX on H100 + packages/rag exact search)
+==========================
+corpus: 1000 docs, 5 clusters
+corpus embed throughput: 30 docs/sec  (33753ms total)
+in-cluster hits: 100/100 (100.0%)
+per-query latency (embed):   avg=1.58ms   p50=1.68ms
+per-query latency (search):  avg=0.088ms   p50=0.086ms
+per-query latency (total):   avg=1.67ms   p50=1.76ms
+
+DONE
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/python3.14/multiprocessing/resource_tracker.py:396: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-zjrebtrw'}
+  warnings.warn(
+
+===== DEMO-REFERENCE (CPU ONNX) =====
+loading @huggingface/transformers feature-extraction pipeline (CPU, unquantized)...
+pipeline ready: 1148ms
+
+requiring hnswlib-node...
+
+building corpus...
+corpus: 1000 docs
+
+embedding corpus on CPU (this is the slow part)...
+corpus embed time: 6999ms (143 docs/sec)
+
+building HNSW index (M=16, efConstruction=100, ip space)...
+HNSW build: 597ms
+
+running 10 queries (k=10)...
+
+==========================
+SUMMARY — reference (CPU ONNX + hnswlib-node)
+==========================
+corpus: 1000 docs, 5 clusters
+corpus embed throughput: 143 docs/sec  (6999ms total)
+
+ef    in-cluster%    embed p50   search p50   total p50    total avg
+ 100   100.0%          2.91ms       0.182ms      3.13ms      19.21ms
+ 500   100.0%          2.79ms       0.374ms      3.13ms      19.54ms
+2000   100.0%          2.58ms       0.424ms      3.00ms      19.63ms
+
+DONE
+---
+# finished: 2026-04-17T00:01:39Z

@@ -1,0 +1,29 @@
+# runpod-launch.sh
+# pod: vk6shi7hq0981h  ssh: 216.243.220.227:19889  gpu: NVIDIA H100 80GB HBM3  cloud: SECURE
+# command: cd /workspace/mojo-addon-examples && git fetch origin && git reset --hard origin/spike/embedding-kernel && echo '=== running embed.py ===' && pixi run python spike/embed.py
+# started: 2026-04-16T23:28:49Z
+---
+From https://github.com/codetalcott/mojo-addon-examples
+   09e78cf..44f9162  spike/embedding-kernel -> origin/spike/embedding-kernel
+HEAD is now at 09e78cf scripts: soft-source bootstrap in runpod-launch so stale volume bootstraps don't block new commands
+Reset branch 'spike/embedding-kernel'
+Branch 'spike/embedding-kernel' set up to track remote branch 'spike/embedding-kernel' from 'origin'.
+Your branch is up to date with 'origin/spike/embedding-kernel'.
+HEAD is now at 44f9162 spike: use safetensors.numpy (torch-free)
+Ready. cd /workspace/mojo-addon-examples (on spike/embedding-kernel at 44f9162)
+=== host 98b9534fe599 === Thu Apr 16 23:28:53 UTC 2026 ===
+NVIDIA H100 80GB HBM3, 81559 MiB
+=== command: cd /workspace/mojo-addon-examples && git fetch origin && git reset --hard origin/spike/embedding-kernel && echo '=== running embed.py ===' && pixi run python spike/embed.py ===
+HEAD is now at 44f9162 spike: use safetensors.numpy (torch-free)
+=== running embed.py ===
+PyTorch was not found. Models won't be available and only tokenizers, configuration and file/data utilities can be used.
+Fetching 30 files:   0%|          | 0/30 [00:00<?, ?it/s]Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+WARNING:huggingface_hub.utils._http:Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Fetching 30 files:   3%|▎         | 1/30 [00:00<00:04,  6.13it/s]Fetching 30 files:  23%|██▎       | 7/30 [00:01<00:05,  3.93it/s]Fetching 30 files:  30%|███       | 9/30 [00:02<00:05,  4.18it/s]Fetching 30 files:  60%|██████    | 18/30 [00:02<00:01,  9.28it/s]Fetching 30 files:  73%|███████▎  | 22/30 [00:02<00:00,  9.65it/s]Fetching 30 files:  87%|████████▋ | 26/30 [00:03<00:00, 11.23it/s]Fetching 30 files: 100%|██████████| 30/30 [00:03<00:00,  9.65it/s]
+embeddings shape: (2, 384)  dtype: float32
+norms: [22.90339 40.54934]
+latency: 9.8ms for batch-2
+first 8 of row 0: [-0.78801644  0.71672577  0.16212918  0.59796685 -0.8966804  -3.6709034
+  1.534046   -0.15175131]
+---
+# finished: 2026-04-16T23:31:17Z

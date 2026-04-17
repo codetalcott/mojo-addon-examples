@@ -290,17 +290,18 @@ Phase 3d primitives live in [`packages/rag/`](packages/rag/) as a sibling Node.j
 
 MiniLM-L6-v2 embeddings on H100 via MAX from inside a Node.js N-API addon, composable with `packages/rag`'s search path. Productized from a 2-day spike (GO verdict 2026-04-17); lives at [`packages/embed/`](packages/embed/).
 
-**All five spike gates passed.** End-to-end query (tokenize + embed + search against 1k corpus + top-10) on H100:
+**MS-MARCO 10k on H100 80GB HBM3** — real passage embeddings (mean-pooled, L2-normalized MiniLM-L6-v2) via [`packages/embed/bench.js`](packages/embed/bench.js), capture at [`docs/bench-post-spike-h100-20260417T020804Z.txt`](docs/bench-post-spike-h100-20260417T020804Z.txt):
 
-| | `@qkstat/embed` (MAX H100) + `@qkstat/rag` exact | Reference (ONNX CPU + hnswlib ef=100) |
-|---|---|---|
-| Per-query total (batch-1 seq-32) | **1.44 ms p50** | 3.13 ms p50 |
-| Corpus embed throughput (warm) | **18,448 docs/sec** | 143 docs/sec |
-| Recall | **1.0 exact** | 1.0 on this corpus |
+| Corpus | Batch | p50 tok + embed + search | p95 | p99 | Search alone (p50) |
+|---|---:|---:|---:|---:|---:|
+| 1k | 1 | **1.36 ms** | 1.65 | 1.89 | 0.08 ms |
+| 10k | 1 | **1.64 ms** | 2.01 | 2.13 | 0.13 ms |
+| 10k | 8 | **3.07 ms** | 3.43 | 4.96 | 0.74 ms |
+| 10k | 64 | 8.15 ms | 9.75 | 10.45 | 4.18 ms |
 
-~2× faster per query; ~130× faster for bulk corpus indexing. Correctness vs. the `@huggingface/transformers` CPU reference is **0.99999 min cosine** across 100 sanity sentences.
+Corpus embed throughput (warm, batch-64): **5,137 docs/sec** at 10k. Correctness vs. the `@huggingface/transformers` CPU reference: **0.999990 min cosine** across 100 sanity sentences. Recall is 1.0 by construction — `@qkstat/rag`'s `searchHandle` is exact (fused matmul + per-row top-k), no ANN tradeoff.
 
-This validates the "kernel-factory" thesis from the portfolio plan — the same Mojo + napi-mojo delivery mechanism composes two addons (`packages/embed/build/embed.node` + `packages/rag/build/rag.node`) cleanly in one Node process with separate CUDA contexts.
+The two addons compose in one Node process with separate CUDA contexts — the "kernel-factory" thesis from the portfolio plan. Async variants (`matmulHandleAsync` / `searchHandleAsync` / `embedTokensAsync`) keep the event loop responsive under concurrent load (p99 event-loop jitter 1.43 ms on M4 Metal, 0 ms on H100 — below sampling floor — at 100 concurrent queries).
 
 See [`docs/embedding-kernel-spike-findings.md`](docs/embedding-kernel-spike-findings.md) for the day-by-day execution log and [`ideas/embedding-kernel-spike-writeup.md`](../../ideas/embedding-kernel-spike-writeup.md) for the GO/NO-GO decision artifact.
 
