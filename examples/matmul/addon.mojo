@@ -108,7 +108,7 @@ def _matmul_vectorized(
         for p in range(K):
             var a_ip = a[i * K + p]
             var row_b = p * N
-            def compute[width: Int](j: Int) unified {mut}:
+            def compute[width: Int](j: Int) unified {read}:
                 var b_chunk = b.load[width=width](row_b + j)
                 var c_chunk = c.load[width=width](row_c + j)
                 c.store[width=width](row_c + j, c_chunk + a_ip * b_chunk)
@@ -156,7 +156,7 @@ def _matmul_tiled(
                     for p in range(pp, p_end):
                         var a_ip = a[i * K + p]
                         var row_b = p * N + jj
-                        def compute[width: Int](j: Int) unified {mut}:
+                        def compute[width: Int](j: Int) unified {read}:
                             var b_chunk = b.load[width=width](row_b + j)
                             var c_chunk = c.load[width=width](row_c + j)
                             c.store[width=width](row_c + j, c_chunk + a_ip * b_chunk)
@@ -208,7 +208,7 @@ def _matmul_parallel(
                         for p in range(pp, p_end):
                             var a_ip = a[i * K + p]
                             var row_b = p * N + jj
-                            def compute[width: Int](j: Int) unified {mut}:
+                            def compute[width: Int](j: Int) unified {read}:
                                 var b_chunk = b.load[width=width](row_b + j)
                                 var c_chunk = c.load[width=width](row_c + j)
                                 c.store[width=width](row_c + j, c_chunk + a_ip * b_chunk)

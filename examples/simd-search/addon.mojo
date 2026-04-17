@@ -114,7 +114,7 @@ def _count_byte_range(
 ) -> Int:
     var count: Int = 0
     var base = start
-    def compute[width: Int](offset: Int) unified {mut}:
+    def compute[width: Int](offset: Int) unified {mut count, read data, read base, read target}:
         var chunk = data.load[width=width](base + offset)
         count += _simd_count_matches(chunk, target)
     vectorize[simd_width_of[DType.uint8]()](end - start, compute)
@@ -210,7 +210,7 @@ def _count_byte_gpu(
     ctx.enqueue_copy(host_partial, dev_partial)
     ctx.synchronize()
 
-    var ptr = host_partial.unsafe_ptr()
+    var ptr = host_partial.unsafe_ptr().value()
     var total: Int = 0
     for i in range(num_blocks):
         total += Int(ptr[i])

@@ -80,7 +80,7 @@ def _simd_sum_min_max(
     var vmin: Float64 = data[start]
     var vmax: Float64 = data[start]
     var base = start
-    def compute[width: Int](offset: Int) unified {mut}:
+    def compute[width: Int](offset: Int) unified {mut vsum, mut vmin, mut vmax, read data, read base}:
         var chunk = data.load[width=width](base + offset)
         vsum += chunk.reduce_add()
         var cmin = chunk.reduce_min()
@@ -138,7 +138,7 @@ def _simd_sum_sq_diff(
 ) -> Float64:
     var sum_sq: Float64 = 0.0
     var base = start
-    def compute[width: Int](offset: Int) unified {mut}:
+    def compute[width: Int](offset: Int) unified {mut sum_sq, read data, read base, read mean}:
         var chunk = data.load[width=width](base + offset)
         var diff = chunk - mean
         sum_sq += (diff * diff).reduce_add()
@@ -323,7 +323,7 @@ def _gpu_sum_min_max(
 
     var dev_data = ctx.enqueue_create_buffer[DType.float32](size)
     var host_data = ctx.enqueue_create_host_buffer[DType.float32](size)
-    var host_ptr = host_data.unsafe_ptr()
+    var host_ptr = host_data.unsafe_ptr().value()
     for i in range(size):
         host_ptr[i] = Float32(data[i])
     ctx.enqueue_copy(dev_data, host_data)
@@ -350,9 +350,9 @@ def _gpu_sum_min_max(
     ctx.enqueue_copy(host_pmax, dev_pmax)
     ctx.synchronize()
 
-    var psum_ptr = host_psum.unsafe_ptr()
-    var pmin_ptr = host_pmin.unsafe_ptr()
-    var pmax_ptr = host_pmax.unsafe_ptr()
+    var psum_ptr = host_psum.unsafe_ptr().value()
+    var pmin_ptr = host_pmin.unsafe_ptr().value()
+    var pmax_ptr = host_pmax.unsafe_ptr().value()
 
     # Final reduction on CPU in Float64 — recovers most of the precision
     # loss of running the per-block sum in Float32.
@@ -384,7 +384,7 @@ def _gpu_sum_sq_diff(
 
     var dev_data = ctx.enqueue_create_buffer[DType.float32](size)
     var host_data = ctx.enqueue_create_host_buffer[DType.float32](size)
-    var host_ptr = host_data.unsafe_ptr()
+    var host_ptr = host_data.unsafe_ptr().value()
     for i in range(size):
         host_ptr[i] = Float32(data[i])
     ctx.enqueue_copy(dev_data, host_data)
@@ -404,7 +404,7 @@ def _gpu_sum_sq_diff(
     ctx.enqueue_copy(host_partial, dev_partial)
     ctx.synchronize()
 
-    var ptr = host_partial.unsafe_ptr()
+    var ptr = host_partial.unsafe_ptr().value()
     var total: Float64 = 0.0
     for i in range(num_blocks):
         total += Float64(ptr[i])
