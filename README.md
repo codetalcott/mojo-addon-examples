@@ -263,6 +263,59 @@ The persistent-buffer template generalizes across all four kernel shapes. What c
 
 See [examples/matmul/README.md](examples/matmul/README.md#phase-3c2--cached-gpu-matmul-via-linalgmatmul-nvidia-h100-80gb-hbm3) for the full teardown and [docs/cloud-benchmark-runbook.md](docs/cloud-benchmark-runbook.md) for reproduction.
 
+## Phase 3d Cloud Benchmark Results — RAG-shape matmul at recall=1.0
+
+Phase 3c validated tensor-core matmul on square shapes; Phase 3d measures it on tall-skinny RAG workloads (`[B, 384] × [384, N]` for semantic search) against real MS-MARCO passage embeddings. Recall is 1.0 by construction — the matmul is exact cosine against a GPU-resident corpus.
+
+```bash
+node examples/matmul/matmul_rag.js --fixture=msmarco-10k --full
+```
+
+**Headline (H100 80GB HBM3, real MiniLM-L6-v2 embeddings, k=10):**
+
+| Baseline | Latency | Recall@10 | |
+|---|---:|---:|---|
+| HNSW `ef=100` | 0.20 ms | 1.00 | hnswlib-node |
+| HNSW `ef=2000` | 1.79 ms | 1.00 | |
+| ORT CPU | 0.13 ms | 1.00 | onnxruntime-node MatMul |
+| **GPU `searchHandle`** | **0.06 ms** | **1.00** | Fused matmul + per-row top-k |
+
+3.3–29× faster than HNSW across all recall levels, with guaranteed exact recall. The "ANN tradeoff" evaporates when you have a GPU and a batch. See [docs/writeup-phase3d.md](docs/writeup-phase3d.md) for the full post and [docs/bench-rag-3d-h100-msmarco.txt](docs/bench-rag-3d-h100-msmarco.txt) for the raw capture.
+
+### Package: `@qkstat/rag`
+
+Phase 3d primitives live in [`packages/rag/`](packages/rag/) as a sibling Node.js package — `v0.1.0-pre`, distributed separately from the root examples. Four GPU primitives (`loadMatrixGpu`, `matmulHandle`, `searchHandle`, `releaseMatrixGpu`) plus a thin `GpuIndex` helper. See [`packages/rag/README.md`](packages/rag/README.md).
+
+## `@qkstat/embed` — local GPU `embed + search` from Node
+
+MiniLM-L6-v2 embeddings on H100 via MAX from inside a Node.js N-API addon, composable with `packages/rag`'s search path. Productized from a 2-day spike (GO verdict 2026-04-17); lives at [`packages/embed/`](packages/embed/).
+
+**MS-MARCO 10k on H100 80GB HBM3** — real passage embeddings (mean-pooled, L2-normalized MiniLM-L6-v2) via [`packages/embed/bench.js`](packages/embed/bench.js), capture at [`docs/bench-post-spike-h100-20260417T020804Z.txt`](docs/bench-post-spike-h100-20260417T020804Z.txt):
+
+| Corpus | Batch | p50 tok + embed + search | p95 | p99 | Search alone (p50) |
+|---|---:|---:|---:|---:|---:|
+| 1k | 1 | **1.36 ms** | 1.65 | 1.89 | 0.08 ms |
+| 10k | 1 | **1.64 ms** | 2.01 | 2.13 | 0.13 ms |
+| 10k | 8 | **3.07 ms** | 3.43 | 4.96 | 0.74 ms |
+| 10k | 64 | 8.15 ms | 9.75 | 10.45 | 4.18 ms |
+
+Corpus embed throughput (warm, batch-64): **5,137 docs/sec** at 10k. Correctness vs. the `@huggingface/transformers` CPU reference: **0.999990 min cosine** across 100 sanity sentences. Recall is 1.0 by construction — `@qkstat/rag`'s `searchHandle` is exact (fused matmul + per-row top-k), no ANN tradeoff.
+
+The two addons compose in one Node process with separate CUDA contexts — the "kernel-factory" thesis from the portfolio plan. Async variants (`matmulHandleAsync` / `searchHandleAsync` / `embedTokensAsync`) keep the event loop responsive under concurrent load (p99 event-loop jitter 1.43 ms on M4 Metal, 0 ms on H100 — below sampling floor — at 100 concurrent queries).
+
+See [`docs/embedding-kernel-spike-findings.md`](docs/embedding-kernel-spike-findings.md) for the day-by-day execution log and [`ideas/embedding-kernel-spike-writeup.md`](../../ideas/embedding-kernel-spike-writeup.md) for the GO/NO-GO decision artifact.
+
+## Pod-side infrastructure
+
+Scripts supporting H100 cloud benchmark runs live in [`scripts/`](scripts/):
+
+- [`scripts/runpod-launch.sh`](scripts/runpod-launch.sh) — one-shot RunPod launcher with `trap EXIT` termination safety net. Launches a pod, SSHes in, runs your command, captures output, terminates. Works with a persistent Network Volume to cache pixi env + model weights.
+- [`scripts/lambda-bench.sh`](scripts/lambda-bench.sh) — Lambda Cloud sibling for the same orchestration. Unused today (capacity issues during the Phase 3d/spike work); kept as fallback.
+- [`scripts/bootstrap.sh`](scripts/bootstrap.sh) — canonical pod-side session bootstrap (PATH + auth + `git fetch` + repo sync). Copied onto the Network Volume so each pod session starts from a known state in ~30 s.
+- [`scripts/runpod-bench-3{b,c,d}.sh`](scripts/) — on-pod bench runners for each phase.
+
+Phase 3d and the spike established the pattern. Total cloud spend across all phase 3 work + spike: under $20.
+
 ## When to Use Mojo
 
 V8's JIT compiler is already fast for scalar code. The matmul example shows this clearly: Mojo with the *same algorithm* is only 1.9-2.2x faster. A native addon has real costs -- build toolchain, N-API call overhead, platform-specific binaries. Mojo is worth reaching for when:

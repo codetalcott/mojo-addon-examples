@@ -125,7 +125,7 @@ def _load_image_gpu(
     # Ephemeral pinned staging buffer — dropped on return.
     var staging = ctx.enqueue_create_host_buffer[DType.uint32](num_pixels)
     memcpy(
-        dest=staging.unsafe_ptr().bitcast[Byte](),
+        dest=staging.unsafe_ptr().value().bitcast[Byte](),
         src=src_bytes,
         count=num_bytes,
     )
@@ -179,7 +179,7 @@ def _grayscale_cached(
 
     memcpy(
         dest=dst_bytes,
-        src=ci[].host_dst.unsafe_ptr().bitcast[Byte](),
+        src=ci[].host_dst.unsafe_ptr().value().bitcast[Byte](),
         count=ci[].num_bytes,
     )
 

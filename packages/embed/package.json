@@ -1,0 +1,50 @@
+{
+  "name": "@qkstat/embed",
+  "version": "0.1.0-pre",
+  "description": "GPU-accelerated MiniLM-L6-v2 embeddings for Node.js — MAX on H100 via Mojo + N-API.",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "lib/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": { "node": ">=22.12" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/codetalcott/mojo-addon-examples.git",
+    "directory": "packages/embed"
+  },
+  "homepage": "https://qkstat.com",
+  "bugs": "https://github.com/codetalcott/mojo-addon-examples/issues",
+  "keywords": [
+    "embeddings",
+    "minilm",
+    "sentence-transformers",
+    "gpu",
+    "cuda",
+    "metal",
+    "max",
+    "mojo",
+    "napi",
+    "rag"
+  ],
+  "license": "MIT",
+  "optionalDependencies": {
+    "@qkstat/embed-darwin-arm64": "0.1.0-pre",
+    "@qkstat/embed-linux-x64": "0.1.0-pre"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.1.0"
+  },
+  "scripts": {
+    "build": "bash build.sh",
+    "demo": "node demo.js",
+    "bench": "node bench.js",
+    "test": "node test-roundtrip.js",
+    "reference": "node reference.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -49,6 +49,8 @@ module.exports = {
   loadMatrixGpu: addon.loadMatrixGpu,
   matmulHandle: addon.matmulHandle,
   searchHandle: addon.searchHandle,
+  matmulHandleAsync: addon.matmulHandleAsync,
+  searchHandleAsync: addon.searchHandleAsync,
   releaseMatrixGpu: addon.releaseMatrixGpu,
   GpuIndex,
 };

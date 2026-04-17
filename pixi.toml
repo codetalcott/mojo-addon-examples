@@ -7,3 +7,12 @@ version = "0.1.0"
 
 [dependencies]
 max = ">=26.3.0.dev2026041605"
+nodejs = ">=22.12"
+# Deps for MAX's BertPipelineModel (sentence-transformers/all-MiniLM-L6-v2)
+# used by packages/embed. Needed to load the HF checkpoint through
+# max.pipelines.architectures.bert.
+pydantic = ">=2.0"
+transformers = ">=4.40"
+safetensors = ">=0.4"
+huggingface_hub = ">=0.20"
+pillow = ">=10.0"

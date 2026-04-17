@@ -285,7 +285,7 @@ def _cast_f64_to_f32_simd(
     dst: UnsafePointer[Float32, MutAnyOrigin],
     size: Int,
 ):
-    def compute[width: Int](offset: Int) unified {mut}:
+    def compute[width: Int](offset: Int) unified {read}:
         var chunk = src.load[width=width](offset)
         dst.store[width=width](offset, chunk.cast[DType.float32]())
     vectorize[simd_width_of[DType.float64]()](size, compute)
@@ -306,7 +306,7 @@ def _load_stats_gpu(
     # Ephemeral pinned staging — vectorized cast writes into it, then H2D
     # uploads to dev_data. Dropped on return.
     var staging = ctx.enqueue_create_host_buffer[DType.float32](size)
-    _cast_f64_to_f32_simd(host_f64, staging.unsafe_ptr(), size)
+    _cast_f64_to_f32_simd(host_f64, staging.unsafe_ptr().value(), size)
     ctx.enqueue_copy(dev_data, staging)
 
     # Persistent reusable partial buffers (device + pinned host).
@@ -383,9 +383,9 @@ def _stats_cached(
     ctx.enqueue_copy(cs[].host_pmax, cs[].dev_pmax)
     ctx.synchronize()
 
-    var psum_ptr = cs[].host_psum.unsafe_ptr()
-    var pmin_ptr = cs[].host_pmin.unsafe_ptr()
-    var pmax_ptr = cs[].host_pmax.unsafe_ptr()
+    var psum_ptr = cs[].host_psum.unsafe_ptr().value()
+    var pmin_ptr = cs[].host_pmin.unsafe_ptr().value()
+    var pmax_ptr = cs[].host_pmax.unsafe_ptr().value()
 
     var total_sum: Float64 = 0.0
     var total_min: Float64 = Float64(pmin_ptr[0])
@@ -413,7 +413,7 @@ def _stats_cached(
     ctx.enqueue_copy(cs[].host_psq, cs[].dev_psq)
     ctx.synchronize()
 
-    var psq_ptr = cs[].host_psq.unsafe_ptr()
+    var psq_ptr = cs[].host_psq.unsafe_ptr().value()
     var sum_sq: Float64 = 0.0
     for i in range(cs[].num_blocks):
         sum_sq += Float64(psq_ptr[i])

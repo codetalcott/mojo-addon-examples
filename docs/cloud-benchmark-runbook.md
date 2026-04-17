@@ -8,10 +8,12 @@ This runbook walks through benchmarking the Mojo GPU kernels on a rented NVIDIA 
 
 - An account at [https://lambda.ai](https://lambda.ai) with a payment method or credits.
 - An SSH key added to your Lambda account. If you don't have one:
+
   ```
   ssh-keygen -t ed25519 -C "lambda-mojo-bench"
   cat ~/.ssh/id_ed25519.pub
   ```
+
   Paste the public key into the Lambda dashboard at **SSH keys → Add SSH key**.
 
 ## 1. Provision an H100

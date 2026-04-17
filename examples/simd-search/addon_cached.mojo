@@ -166,7 +166,7 @@ def _load_gpu(
     var dev_data = ctx.enqueue_create_buffer[DType.uint8](size)
 
     var staging = ctx.enqueue_create_host_buffer[DType.uint8](size)
-    memcpy(dest=staging.unsafe_ptr(), src=host_data, count=size)
+    memcpy(dest=staging.unsafe_ptr().value(), src=host_data, count=size)
     ctx.enqueue_copy(dev_data, staging)
 
     var dev_partial = ctx.enqueue_create_buffer[DType.uint32](num_blocks)
@@ -212,7 +212,7 @@ def _count_byte_cached(
     ctx.enqueue_copy(cb[].host_partial, cb[].partial)
     ctx.synchronize()
 
-    var ptr = cb[].host_partial.unsafe_ptr()
+    var ptr = cb[].host_partial.unsafe_ptr().value()
     var total: Int = 0
     for i in range(cb[].num_blocks):
         total += Int(ptr[i])

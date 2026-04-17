@@ -79,7 +79,7 @@ def _grayscale_rows(
     var dst32 = dst.bitcast[UInt32]()
     var base = start_row * width
     var num_pixels = (end_row - start_row) * width
-    def compute[w: Int](offset: Int) unified {mut}:
+    def compute[w: Int](offset: Int) unified {read}:
         var pixels = src32.load[width=w](base + offset)
         var r = pixels & SIMD[DType.uint32, w](0xFF)
         var g = (pixels >> 8) & SIMD[DType.uint32, w](0xFF)
@@ -138,7 +138,7 @@ def _grayscale_gpu(
     var host_src = ctx.enqueue_create_host_buffer[DType.uint32](num_pixels)
 
     memcpy(
-        dest=host_src.unsafe_ptr().bitcast[Byte](),
+        dest=host_src.unsafe_ptr().value().bitcast[Byte](),
         src=src,
         count=num_bytes,
     )
@@ -159,7 +159,7 @@ def _grayscale_gpu(
 
     memcpy(
         dest=dst,
-        src=host_dst.unsafe_ptr().bitcast[Byte](),
+        src=host_dst.unsafe_ptr().value().bitcast[Byte](),
         count=num_bytes,
     )
 
@@ -178,7 +178,7 @@ def _brightness_rows(
     var dst32 = dst.bitcast[UInt32]()
     var base = start_row * width
     var num_pixels = (end_row - start_row) * width
-    def compute[w: Int](offset: Int) unified {mut}:
+    def compute[w: Int](offset: Int) unified {read}:
         var pixels = src32.load[width=w](base + offset)
         var r = pixels & SIMD[DType.uint32, w](0xFF)
         var g = (pixels >> 8) & SIMD[DType.uint32, w](0xFF)
@@ -218,7 +218,7 @@ def _threshold_rows(
     var dst32 = dst.bitcast[UInt32]()
     var base = start_row * width
     var num_pixels = (end_row - start_row) * width
-    def compute[w: Int](offset: Int) unified {mut}:
+    def compute[w: Int](offset: Int) unified {read}:
         var pixels = src32.load[width=w](base + offset)
         var r = pixels & SIMD[DType.uint32, w](0xFF)
         var g = (pixels >> 8) & SIMD[DType.uint32, w](0xFF)

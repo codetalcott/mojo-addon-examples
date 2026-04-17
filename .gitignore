@@ -12,3 +12,24 @@ skills-lock.json
 grail.yaml
 examples/rag-demo/fixtures/*.bin
 examples/rag-demo/fixtures/.cache/
+
+# RunPod per-session capture files — regenerated on every launch.
+# Preserve deliberately with `git add -f docs/<file>.txt` when a checked-in
+# doc (README, findings, writeup) links to one.
+docs/runpod-bench-*.txt
+docs/runpod-seed-*.txt
+docs/runpod-prewarm-*.txt
+docs/runpod-volume-update-*.txt
+docs/runpod-day*.txt
+docs/runpod-dlpack-*.txt
+docs/runpod-embed-day*.txt
+docs/lambda-bench-*.txt
+docs/bench-*.txt
+pixi.lock
+
+.vscode/
+
+# Personal working drafts (outreach copy, pitch scratch, one-offs that
+# aren't part of the public repo's documentation)
+docs/*-draft.md
+docs/plan-multilingual-semantic-search.html

@@ -1,0 +1,47 @@
+# runpod-launch.sh
+# pod: vlo2rs7tgys01r  ssh: 216.243.220.227:13439  gpu: NVIDIA H100 80GB HBM3  cloud: SECURE
+# command: cd /workspace/mojo-addon-examples && git fetch origin && git reset --hard origin/spike/embedding-kernel &&    pixi run bash spike/build.sh 2>&1 | grep -E 'error|Build complete' | tail -2 &&    echo '=== Gate F4 ===' &&    pixi run node spike/test-roundtrip.js
+# started: 2026-04-16T23:45:54Z
+---
+From https://github.com/codetalcott/mojo-addon-examples
+   cc33747..33ba1f9  spike/embedding-kernel -> origin/spike/embedding-kernel
+HEAD is now at cc33747 spike: fix Mojo compile (StringLiteral) + reference.js mkdir fixtures
+Reset branch 'spike/embedding-kernel'
+Branch 'spike/embedding-kernel' set up to track remote branch 'spike/embedding-kernel' from 'origin'.
+Your branch is up to date with 'origin/spike/embedding-kernel'.
+HEAD is now at 33ba1f9 spike: tokenize — adapt to @huggingface/transformers v4 Tensor API
+Ready. cd /workspace/mojo-addon-examples (on spike/embedding-kernel at 33ba1f9)
+=== host bc3d11958b4e === Thu Apr 16 23:45:57 UTC 2026 ===
+NVIDIA H100 80GB HBM3, 81559 MiB
+=== command: cd /workspace/mojo-addon-examples && git fetch origin && git reset --hard origin/spike/embedding-kernel &&    pixi run bash spike/build.sh 2>&1 | grep -E 'error|Build complete' | tail -2 &&    echo '=== Gate F4 ===' &&    pixi run node spike/test-roundtrip.js ===
+HEAD is now at 33ba1f9 spike: tokenize — adapt to @huggingface/transformers v4 Tensor API
+Build complete: spike/build/embed.node
+=== Gate F4 ===
+sanity set: 100 sentences, ground-truth shape: (100, 384)
+tokenizing...
+  tokens shape: [100, 14]  (batch=100, seq_len=14)
+calling embedTokens() — this will spin up MAX on first call (expect ~10-30s cold start)
+PyTorch was not found. Models won't be available and only tokenizers, configuration and file/data utilities can be used.
+2026-04-16 23:46:31,403 INFO device: Device(type=gpu,id=0)
+2026-04-16 23:46:31,403 INFO fetching sentence-transformers/all-MiniLM-L6-v2 (cache: /workspace/persist/model-cache)
+2026-04-16 23:46:31,554 INFO HTTP Request: GET https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2/revision/main "HTTP/1.1 200 OK"
+Fetching 30 files:   0%|          | 0/30 [00:00<?, ?it/s]Fetching 30 files: 100%|██████████| 30/30 [00:00<00:00, 3298.19it/s]
+2026-04-16 23:46:31,761 INFO loaded 104 weight tensors from safetensors
+2026-04-16 23:46:31,761 INFO after adapter: 101 tensors
+2026-04-16 23:46:31,798 INFO building graph (vocab=30522, hidden=384)
+2026-04-16 23:46:31,937 INFO compiling with InferenceSession.load...
+  first-call latency: 27932ms (includes model load + compile)
+correctness (vs @huggingface/transformers CPU reference):
+  mean cosine: 0.999998
+  min cosine:  0.999990  (sentence 36: "Comments explain why, not what.")
+
+warming up (5 iters)...
+2026-04-16 23:46:32,453 INFO ready  (compile: 0.5s, total init: 1.8s)
+warm latency (batch-100, seq_len-14): 2.82ms/op
+
+✅ GATE F4 PASS: min cosine 1.0000 ≥ 0.995
+   (cold: 27932ms, warm: 2.82ms/op over 20 iters)
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/python3.14/multiprocessing/resource_tracker.py:396: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-kfqslgcp'}
+  warnings.warn(
+---
+# finished: 2026-04-16T23:46:32Z
