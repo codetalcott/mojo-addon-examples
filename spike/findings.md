@@ -309,9 +309,82 @@ the regression because Day 4 needed `rag.node` built alongside `embed.node`.
    breaks even with HNSW's log(N) advantage.
 5. **Throughput** — QPS at sustained batch-1 (what a serving API looks like).
 
-## Day 5 — to be filled in
+## Day 5 — benchmarks (Gates F2, F3 PASS)
 
-(benchmarks — Gate F2 / F3, proper methodology)
+### Warm-path numbers on H100 (post-JIT, 50-iter p50)
+
+```text
+CORPUS 1000 docs
+  batch-1  seq-32    total=1.44 ms  (p95=2.13, p99=2.30)
+  batch-1  seq-128   total=2.68 ms  (p95=3.17, p99=3.34)
+  batch-64 seq-32    total=8.64 ms
+  batch-64 seq-128   total=17.88 ms
+
+CORPUS 10000 docs
+  batch-1  seq-32    total=1.81 ms
+  batch-1  seq-128   total=2.89 ms
+  batch-64 seq-128   total=18.67 ms
+
+Corpus-embed warm throughput: 18,448 docs/sec (batch-64, post-JIT)
+Cold-start (one-time): 29.6 s
+```
+
+Capture: `docs/runpod-day5-bench-20260417T001138Z.txt`.
+
+### Per-stage timing (batch-1 seq-32, 1k corpus)
+
+| Stage | p50 |
+|---|---|
+| Tokenize (JS, `@huggingface/transformers`) | 0.06 ms |
+| Embed (MAX GPU forward + D2H) | 1.30 ms |
+| Search (`packages/rag` matmul + top-k) | 0.084 ms |
+| **Total** | **1.44 ms** |
+
+Tokenize is 4% of total latency — not a bottleneck. F3's 20 ms budget had
+300× headroom.
+
+### Gate F2 / F3 verdicts
+
+- **F2 batch-1**: target ≤ 5 ms, measured **1.44 ms seq-32 / 2.68 ms seq-128** → **PASS** (3× headroom)
+- **F2 batch-64**: target ≤ 20 ms, measured **8.64 ms seq-32 / 17.88 ms seq-128** → **PASS**
+- **F3 tokenize**: target ≤ 20 ms, measured **0.06 ms / 0.44 ms** → **PASS** (300× headroom)
+
+### Observations
+
+1. **Cold-start is CUDA kernel JIT.** 29.6 s on first batch; subsequent batches are warm. Day 4's "corpus embed 33 s" confusion explained — it was almost entirely first-batch JIT.
+2. **Batch-64 search is JS-level-serial.** `rag.node`'s `searchHandle` supports multi-row input natively, but `GpuIndex.search` wraps it as a JS loop. Fixing this (→ `GpuIndex.searchBatch`) would drop batch-64 search from ~3 ms to sub-ms.
+3. **Search grows with N.** 0.084 ms on 1k vs 0.158 ms on 10k at batch-1 — that's the O(N) matmul. Still tiny in absolute terms; at 100k corpus expect ~1-2 ms per query total.
+4. **HNSW vs exact crossover is favorable.** Reference's CPU ONNX + hnswlib ef=100 is 3.13 ms total at 1k. Spike is 1.44 ms at 1k, 1.81 ms at 10k. Spike stays ahead as corpus grows (O(N) matmul scales better than expected given H100's memory bandwidth).
+
+### Compared to CPU reference
+
+| | Spike (MAX H100) | Reference (ONNX CPU + hnswlib ef=100) |
+|---|---|---|
+| Per-query total (batch-1 seq-32, 1k corpus) | 1.44 ms | 3.13 ms |
+| Corpus embed throughput (warm) | 18,448 docs/sec | 143 docs/sec |
+| Recall | 1.0 (exact) | 1.0 (on easy clustered corpus) |
+| Cold-start | 29.6 s | 1.1 s |
+
+**~2× faster per query, ~130× faster for corpus indexing** at honest warm numbers.
+
+---
+
+## Day 10 — writeup complete
+
+See [`ideas/embedding-kernel-spike-writeup.md`](../../../ideas/embedding-kernel-spike-writeup.md)
+for the portfolio-level GO/NO-GO artifact. Spike ends here; next steps are
+in Phase 1 of the productization plan.
+
+**Verdict: GO** on the killer-kernel path.
+
+### Budget actuals
+
+- Pod-hours: ~3 H100 SXM at $2.99/hr
+- Total spend: **~$10**
+- Laptop iteration time: ~8 hours focused
+- Days elapsed: 2 (planned: 10 working days)
+
+Well under the budget ceiling the spike plan anticipated.
 
 ## Day 10 — to be filled in
 
