@@ -377,6 +377,14 @@ in Phase 1 of the productization plan.
 
 **Verdict: GO** on the killer-kernel path.
 
+**For the tactical 2–4 week plan following this spike**, see
+[`ideas/post-spike-next-steps.md`](../../../ideas/post-spike-next-steps.md)
+— critical path (promote `spike/` → `packages/embed/`, wire async N-API,
+resolve Modular license, MS-MARCO bench, publish writeup) plus parallel
+investigations and decision gates. The strategic 10-week plan in
+[`ideas/rag-productization.md`](../../../ideas/rag-productization.md) stays
+canonical; Phase 3b (embedding) is now pulled forward to Phase 1b.
+
 ### Budget actuals
 
 - Pod-hours: ~3 H100 SXM at $2.99/hr
