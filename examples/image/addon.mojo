@@ -138,7 +138,7 @@ def _grayscale_gpu(
     var host_src = ctx.enqueue_create_host_buffer[DType.uint32](num_pixels)
 
     memcpy(
-        dest=host_src.unsafe_ptr().value().bitcast[Byte](),
+        dest=host_src.unsafe_ptr().bitcast[Byte](),
         src=src,
         count=num_bytes,
     )
@@ -159,7 +159,7 @@ def _grayscale_gpu(
 
     memcpy(
         dest=dst,
-        src=host_dst.unsafe_ptr().value().bitcast[Byte](),
+        src=host_dst.unsafe_ptr().bitcast[Byte](),
         count=num_bytes,
     )
 
