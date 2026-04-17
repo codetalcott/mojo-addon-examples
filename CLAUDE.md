@@ -10,7 +10,7 @@ The repo is structured as three cohabiting things:
 
 - **`examples/`** — one directory per kernel (matmul, simd-search, stats, image, wyhash, rag-demo). Each is a self-contained Mojo addon + JS demo/bench/test.
 - **`packages/rag/`** — `@qkstat/rag`, a distributed Node package (GPU exact-retrieval primitives: `loadMatrixGpu` / `matmulHandle` / `searchHandle` / `releaseMatrixGpu` + `GpuIndex`). Has its own build, platform sub-packages under `npm/`, and Jest tests.
-- **`packages/embed/`** — `@qkstat/embed`, MiniLM-L6-v2 embeddings on H100 via MAX + Python interop. Productized from the embedding-kernel spike (2026-04-17 GO verdict); composes with `packages/rag` at runtime in one Node process. Historical spike log at [`docs/embedding-kernel-spike-findings.md`](docs/embedding-kernel-spike-findings.md); `spike/` remains as a stub redirect pending cleanup.
+- **`packages/embed/`** — `@qkstat/embed`, MiniLM-L6-v2 embeddings on H100 via MAX + Python interop. Productized from the embedding-kernel spike (2026-04-17 GO verdict); composes with `packages/rag` at runtime in one Node process. Historical spike log at [`docs/embedding-kernel-spike-findings.md`](docs/embedding-kernel-spike-findings.md).
 
 ## Common commands
 
