@@ -154,7 +154,7 @@ async function main() {
   await writeJsonl(path.join(OUT_DIR, `${name}-queries.jsonl`), queries);
 
   console.log(`2) loading ${MODEL} (first run downloads ~25 MB of weights)`);
-  const { pipeline } = await import('@xenova/transformers');
+  const { pipeline } = await import('@huggingface/transformers');
   const embed = await pipeline('feature-extraction', MODEL, { quantized: true });
 
   const embedAll = async (texts, label) => {
