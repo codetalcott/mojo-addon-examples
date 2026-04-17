@@ -232,9 +232,86 @@ honest per-shape numbers.
 - **End-to-end (tokenize + embed + search + top-10) for a 10k corpus**:
   target ≤ 5 ms on H100 per query
 
+## Day 4 — end-to-end demo
+
+### What works
+
+Two addons in one Node process, each with its own CUDA context, cleanly
+composed:
+
+1. `spike/build/embed.node` — MiniLM-L6-v2 forward via MAX on H100
+2. `packages/rag/build/rag.node` — exact cosine search + top-k via `linalg.matmul`
+
+Host-bounce between them (numpy → JS Float32Array → `loadMatrixGpu`) adds
+~40μs per query. Negligible vs. ~1.6ms embed + 0.09ms search.
+
+### Demo numbers (1000-doc programmatic clustered corpus, k=10)
+
+```text
+Spike (MAX GPU + packages/rag exact):
+  per-query (warm):
+    embed   p50 = 1.68 ms   avg = 1.58 ms
+    search  p50 = 0.086 ms  avg = 0.088 ms
+    total   p50 = 1.76 ms   avg = 1.67 ms
+  accuracy: 100/100 in-cluster hits
+
+Reference (ONNX CPU + hnswlib-node):
+  per-query (ef=100, warm):
+    embed   p50 = 2.91 ms
+    search  p50 = 0.18 ms
+    total   p50 = 3.13 ms
+  accuracy: 100/100 in-cluster hits
+```
+
+Capture: `docs/runpod-day4-20260416T235942Z.txt`.
+
+**Spike is 1.8× faster end-to-end for single-query retrieval on a 1k corpus.**
+The gap will widen with larger corpora (search is O(N) on our exact path but
+GPU-parallel; HNSW is O(log N) but CPU-serial).
+
+### Demo surprise: corpus embed looks slow but isn't
+
+`spike/demo.js` reports "corpus embed: 33.75s (30 docs/sec)" while reference
+runs "7.0s (143 docs/sec)". Looks like the GPU path is 5× slower for bulk,
+which would contradict the headline.
+
+**It's almost entirely CUDA kernel JIT on the first batch.** Breakdown:
+
+- Cold first `embedTokens` call: ~33s (model load cached on volume + CUDA
+  kernel compile + first forward)
+- Subsequent 15 warm batches: ~30ms total (~2ms/batch-64)
+
+For a long-running service (API, daemon, scheduled job) the cold cost is
+paid once and becomes irrelevant. For scripts or CLI tools the ~30s cold
+start matters. Day 5 benchmarks will separate cold vs. warm explicitly.
+
+**Reference doesn't have this shape** because ONNX Runtime's CPU EP JIT is
+per-op and per-CPU-feature, typically ~seconds total rather than per-kernel
+on GPU. Not a property of the model architecture, a property of how each
+runtime initializes.
+
+### Incidental fix landed: rag against MAX 26.3+
+
+`packages/rag/src/kernels.mojo` stopped compiling because MAX's
+`HostBuffer.unsafe_ptr()` now returns `Optional[UnsafePointer[...]]`
+instead of a plain pointer. Fixed by calling `.value()` before
+`.bitcast[Byte]()`. Unrelated to the spike's thesis, but the spike caught
+the regression because Day 4 needed `rag.node` built alongside `embed.node`.
+
+### What's left for Day 5 (benchmarks)
+
+1. **Separate cold vs. warm latency** — right now corpus embed time is
+   dominated by first-batch JIT. Need to report p50 over warm batches only.
+2. **Per-shape latency** — batch-1, batch-8, batch-64 at seq_len-32 and
+   seq_len-128 (production-representative).
+3. **Separate timers** — tokenize, H2D, forward, D2H, matmul, top-k.
+4. **Larger corpus** — 10k and 100k docs to see where exact cosine matmul
+   breaks even with HNSW's log(N) advantage.
+5. **Throughput** — QPS at sustained batch-1 (what a serving API looks like).
+
 ## Day 5 — to be filled in
 
-(benchmark — Gate F2 / F3)
+(benchmarks — Gate F2 / F3, proper methodology)
 
 ## Day 10 — to be filled in
 
