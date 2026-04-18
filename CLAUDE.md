@@ -12,6 +12,8 @@ The repo is structured as three cohabiting things:
 - **`packages/rag/`** — `@qkstat/rag`, a distributed Node package (GPU exact-retrieval primitives: `loadMatrixGpu` / `matmulHandle` / `searchHandle` / `releaseMatrixGpu` + `GpuIndex`). Has its own build, platform sub-packages under `npm/`, and Jest tests.
 - **`packages/embed/`** — `@qkstat/embed`, MiniLM-L6-v2 embeddings on H100 via MAX + Python interop. Productized from the embedding-kernel spike (2026-04-17 GO verdict); composes with `packages/rag` at runtime in one Node process. Historical spike log at [`docs/embedding-kernel-spike-findings.md`](docs/embedding-kernel-spike-findings.md).
 
+The `@qkstat` landing page at [qkstat.dev](https://qkstat.dev) is built from a separate repo (`qkstat-site`, Eleventy + Fly.io + Cloudflare). When a new package publishes or benchmark numbers change, `src/_data/packages.yaml` in that repo is the single maintenance surface — add an entry or flip `status: pre-release` → `published`.
+
 ## Common commands
 
 The Mojo toolchain comes from pixi; Node scripts run under the pixi environment too.
