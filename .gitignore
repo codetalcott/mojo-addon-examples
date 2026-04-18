@@ -32,4 +32,6 @@ pixi.lock
 # Personal working drafts (outreach copy, pitch scratch, one-offs that
 # aren't part of the public repo's documentation)
 docs/*-draft.md
+docs/modular-letter-draft-revised.md
+docs/modular-npm-runtime-proposal.md
 docs/plan-multilingual-semantic-search.html
