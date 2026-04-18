@@ -60,21 +60,48 @@ This means **MAX kernel code from `linalg` ends up baked into our binary at comp
 
 Tier 3 is 67K vs tier 2's 63K. The `layout` package contributes very little when used minimally (a single TileTensor wrap + indexing), and zero new dynamic deps beyond what tier 2 already had.
 
-## Findings — Linux (not yet measured)
+## Findings — Linux / sm_80 (H100)
 
-The letter is specifically about the Linux `sm_80` build of `packages/rag`, where the dep set the user observed via `ldd` was 5 libs:
+Verified on NVIDIA H100 80GB HBM3 via RunPod on 2026-04-18. Capture: [`docs/spike-mojo-runtime-linux-20260418T173556Z.txt`](spike-mojo-runtime-linux-20260418T173556Z.txt).
+
+### 1. All five libs from the letter are linked to tier 1 (CPU-only, no GPU code).
+
+Tier 1 uses `std.algorithm` (vectorize/parallelize) and `std.memory` (alloc). It has no `std.gpu` import, no `layout`, no `linalg`, and no `--target-accelerator`. Yet `ldd` on `tier1.so` shows:
 
 ```
-libKGENCompilerRTShared.so
-libAsyncRTMojoBindings.so
-libAsyncRTRuntimeGlobals.so
-libMSupportGlobals.so
-libNVPTX.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libKGENCompilerRTShared.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTMojoBindings.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTRuntimeGlobals.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libMSupportGlobals.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libNVPTX.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libstdc++.so.6
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libgcc_s.so.1
++ system: linux-vdso.so.1, libc.so.6, libm.so.6, libdl.so.2, ld-linux-x86-64.so.2
 ```
 
-The first four of those are the same Mojo-runtime libs we observed on Darwin. The fifth, `libNVPTX.so`, is the NVIDIA-side equivalent of the Metal driver glue that the Darwin build links against (Apple's Metal framework, not enumerated in the letter because it's part of macOS, not pixi).
+**The letter's framing of `libNVPTX.so` as "the NVIDIA PTX driver wrapper" pulled in only by GPU code is empirically wrong.** It's linked unconditionally. The Mojo async runtime (libAsyncRTMojoBindings) and/or the compiler driver pulls it in regardless of whether the source has any GPU code. Tiers 2, 3, 4 add no new dynamic libs on top of tier 1.
 
-**Hypothesis carried over from Darwin:** all five Linux libs are Mojo compiler runtime, pulled in unconditionally regardless of whether `linalg`/`layout` are imported. To verify, run the same five-tier inspector on H100 RunPod — see "Next steps" below.
+### 2. Tier 0 (hello world, `std.math` only) is fully statically linked.
+
+`ldd tier0.so` → `statically linked`. A Mojo binary that only does `sqrt(x) * 2.0` has no dynamic library dependencies on Linux. The compiler elides everything. First real runtime hit is tier 1, where `alloc` and `parallelize` force the Mojo runtime in.
+
+This means the five libs above aren't "injected by the linker into every Mojo binary" — they're pulled in by specific Mojo-stdlib features (async runtime, memory allocation). But they are **not** pulled in by `std.gpu`, `layout`, or `linalg` specifically; they predate any GPU import.
+
+### 3. Tier-vs-tier dep sets are byte-identical (tiers 1–4) on Linux.
+
+Same story as Darwin: `linalg` and `layout` add zero new dynamic dependencies. `linalg`'s kernel code is statically embedded (tier 4 is 148K vs tier 3's 50K — ~98K of compiled sm_80 PTX/SASS from `linalg::gemv::gemv_split_k` or equivalent).
+
+### 4. Linux binary sizes (for reference)
+
+| Tier | Linux size | Darwin size |
+|---|---|---|
+| 0 | 15K | 16K |
+| 1 | 48K | 61K |
+| 2 | 46K | 63K |
+| 3 | 50K | 67K |
+| 4 | 148K | 113K |
+
+Tier 4 is bigger on Linux — embedded sm_80 PTX text is larger than Metal's AIR bytecode for the same kernel.
 
 ## Licensing implications
 

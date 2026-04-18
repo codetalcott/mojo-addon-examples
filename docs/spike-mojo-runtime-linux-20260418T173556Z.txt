@@ -1,0 +1,167 @@
+# runpod-launch.sh
+# pod: wkb1kr3vjgwb9n  ssh: 216.243.220.227:11719  gpu: NVIDIA H100 80GB HBM3  cloud: SECURE
+# command: git fetch origin && git checkout -B spike/mojo-runtime-isolation origin/spike/mojo-runtime-isolation && git reset --hard origin/spike/mojo-runtime-isolation && pixi install && bash spikes/mojo-runtime/build_and_inspect.sh && echo '=== tier0 deps ===' && cat spikes/mojo-runtime/build/tier0.deps.txt && echo '=== tier1 deps ===' && cat spikes/mojo-runtime/build/tier1.deps.txt && echo '=== tier2 deps ===' && cat spikes/mojo-runtime/build/tier2.deps.txt && echo '=== tier3 deps ===' && cat spikes/mojo-runtime/build/tier3.deps.txt && echo '=== tier4 deps ===' && cat spikes/mojo-runtime/build/tier4.deps.txt && echo '=== sizes ===' && ls -la spikes/mojo-runtime/build/
+# started: 2026-04-18T17:36:28Z
+---
+From https://github.com/codetalcott/mojo-addon-examples
+ * [new branch]      fix/mojo-nightly-2026041716 -> origin/fix/mojo-nightly-2026041716
+   f4b0fe5..3e0c2e6  main       -> origin/main
+ * [new branch]      spike/mojo-runtime-isolation -> origin/spike/mojo-runtime-isolation
+HEAD is now at 28d111c rag: restore unsafe_ptr().value() for Mojo 2026041520+
+Reset branch 'spike/embedding-kernel'
+Branch 'spike/embedding-kernel' set up to track remote branch 'main' from 'origin'.
+Your branch is ahead of 'origin/spike/embedding-kernel' by 9 commits.
+  (use "git push" to publish your local commits)
+HEAD is now at 28d111c rag: restore unsafe_ptr().value() for Mojo 2026041520+
+Ready. cd /workspace/mojo-addon-examples (on spike/embedding-kernel at 28d111c)
+=== host 306b73b3ffad === Sat Apr 18 17:36:35 UTC 2026 ===
+NVIDIA H100 80GB HBM3, 81559 MiB
+=== command: git fetch origin && git checkout -B spike/mojo-runtime-isolation origin/spike/mojo-runtime-isolation && git reset --hard origin/spike/mojo-runtime-isolation && pixi install && bash spikes/mojo-runtime/build_and_inspect.sh && echo '=== tier0 deps ===' && cat spikes/mojo-runtime/build/tier0.deps.txt && echo '=== tier1 deps ===' && cat spikes/mojo-runtime/build/tier1.deps.txt && echo '=== tier2 deps ===' && cat spikes/mojo-runtime/build/tier2.deps.txt && echo '=== tier3 deps ===' && cat spikes/mojo-runtime/build/tier3.deps.txt && echo '=== tier4 deps ===' && cat spikes/mojo-runtime/build/tier4.deps.txt && echo '=== sizes ===' && ls -la spikes/mojo-runtime/build/ ===
+Branch 'spike/mojo-runtime-isolation' set up to track remote branch 'spike/mojo-runtime-isolation' from 'origin'.
+Switched to a new branch 'spike/mojo-runtime-isolation'
+HEAD is now at 3cc8b48 spike: add mojo-runtime-isolation experiment (tier 0-4)
+✔ The default environment has been installed.
+==> building tier0 (/workspace/mojo-addon-examples/spikes/mojo-runtime/src/tier0_cpu_only.mojo)
+    direct deps:
+      statically
+    transitive deps -> /workspace/mojo-addon-examples/spikes/mojo-runtime/build/tier0.deps.txt (1 entries)
+
+==> building tier1 (/workspace/mojo-addon-examples/spikes/mojo-runtime/src/tier1_cpu_simd.mojo)
+    direct deps:
+      linux-vdso.so.1
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libKGENCompilerRTShared.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTMojoBindings.so
+      /lib/x86_64-linux-gnu/libc.so.6
+      /lib/x86_64-linux-gnu/libm.so.6
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libstdc++.so.6
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libMSupportGlobals.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTRuntimeGlobals.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libNVPTX.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libgcc_s.so.1
+      /lib64/ld-linux-x86-64.so.2
+      /lib/x86_64-linux-gnu/libdl.so.2
+    transitive deps -> /workspace/mojo-addon-examples/spikes/mojo-runtime/build/tier1.deps.txt (13 entries)
+
+==> building tier2 (/workspace/mojo-addon-examples/spikes/mojo-runtime/src/tier2_gpu_raw.mojo)
+    direct deps:
+      linux-vdso.so.1
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libKGENCompilerRTShared.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTMojoBindings.so
+      /lib/x86_64-linux-gnu/libc.so.6
+      /lib/x86_64-linux-gnu/libm.so.6
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libstdc++.so.6
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libMSupportGlobals.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTRuntimeGlobals.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libNVPTX.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libgcc_s.so.1
+      /lib64/ld-linux-x86-64.so.2
+      /lib/x86_64-linux-gnu/libdl.so.2
+    transitive deps -> /workspace/mojo-addon-examples/spikes/mojo-runtime/build/tier2.deps.txt (13 entries)
+
+==> building tier3 (/workspace/mojo-addon-examples/spikes/mojo-runtime/src/tier3_gpu_layout.mojo)
+    direct deps:
+      linux-vdso.so.1
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libKGENCompilerRTShared.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTMojoBindings.so
+      /lib/x86_64-linux-gnu/libc.so.6
+      /lib/x86_64-linux-gnu/libm.so.6
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libstdc++.so.6
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libMSupportGlobals.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTRuntimeGlobals.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libNVPTX.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libgcc_s.so.1
+      /lib64/ld-linux-x86-64.so.2
+      /lib/x86_64-linux-gnu/libdl.so.2
+    transitive deps -> /workspace/mojo-addon-examples/spikes/mojo-runtime/build/tier3.deps.txt (13 entries)
+
+==> building tier4 (/workspace/mojo-addon-examples/spikes/mojo-runtime/src/tier4_gpu_linalg.mojo)
+    direct deps:
+      linux-vdso.so.1
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libKGENCompilerRTShared.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTMojoBindings.so
+      /lib/x86_64-linux-gnu/libc.so.6
+      /lib/x86_64-linux-gnu/libm.so.6
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libstdc++.so.6
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libMSupportGlobals.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTRuntimeGlobals.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libNVPTX.so
+      /workspace/mojo-addon-examples/.pixi/envs/default/lib/libgcc_s.so.1
+      /lib64/ld-linux-x86-64.so.2
+      /lib/x86_64-linux-gnu/libdl.so.2
+    transitive deps -> /workspace/mojo-addon-examples/spikes/mojo-runtime/build/tier4.deps.txt (13 entries)
+
+==> all builds done
+=== tier0 deps ===
+statically
+=== tier1 deps ===
+linux-vdso.so.1
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libKGENCompilerRTShared.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTMojoBindings.so
+/lib/x86_64-linux-gnu/libc.so.6
+/lib/x86_64-linux-gnu/libm.so.6
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libstdc++.so.6
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libMSupportGlobals.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTRuntimeGlobals.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libNVPTX.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libgcc_s.so.1
+/lib64/ld-linux-x86-64.so.2
+/lib/x86_64-linux-gnu/libdl.so.2
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/./libgcc_s.so.1
+=== tier2 deps ===
+linux-vdso.so.1
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libKGENCompilerRTShared.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTMojoBindings.so
+/lib/x86_64-linux-gnu/libc.so.6
+/lib/x86_64-linux-gnu/libm.so.6
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libstdc++.so.6
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libMSupportGlobals.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTRuntimeGlobals.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libNVPTX.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libgcc_s.so.1
+/lib64/ld-linux-x86-64.so.2
+/lib/x86_64-linux-gnu/libdl.so.2
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/./libgcc_s.so.1
+=== tier3 deps ===
+linux-vdso.so.1
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libKGENCompilerRTShared.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTMojoBindings.so
+/lib/x86_64-linux-gnu/libc.so.6
+/lib/x86_64-linux-gnu/libm.so.6
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libstdc++.so.6
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libMSupportGlobals.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTRuntimeGlobals.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libNVPTX.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libgcc_s.so.1
+/lib64/ld-linux-x86-64.so.2
+/lib/x86_64-linux-gnu/libdl.so.2
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/./libgcc_s.so.1
+=== tier4 deps ===
+linux-vdso.so.1
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libKGENCompilerRTShared.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTMojoBindings.so
+/lib/x86_64-linux-gnu/libc.so.6
+/lib/x86_64-linux-gnu/libm.so.6
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libstdc++.so.6
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libMSupportGlobals.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libAsyncRTRuntimeGlobals.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libNVPTX.so
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/libgcc_s.so.1
+/lib64/ld-linux-x86-64.so.2
+/lib/x86_64-linux-gnu/libdl.so.2
+/workspace/mojo-addon-examples/.pixi/envs/default/lib/./libgcc_s.so.1
+=== sizes ===
+total 2320
+drwxrwxrwx 2 root root 1030290 Apr 18 17:37 .
+drwxrwxrwx 4 root root 1031318 Apr 18 17:37 ..
+-rw-rw-rw- 1 root root      11 Apr 18 17:37 tier0.deps.txt
+-rwxrwxrwx 1 root root   14952 Apr 18 17:37 tier0.so
+-rw-rw-rw- 1 root root     733 Apr 18 17:37 tier1.deps.txt
+-rwxrwxrwx 1 root root   47984 Apr 18 17:37 tier1.so
+-rw-rw-rw- 1 root root     733 Apr 18 17:37 tier2.deps.txt
+-rwxrwxrwx 1 root root   46040 Apr 18 17:37 tier2.so
+-rw-rw-rw- 1 root root     733 Apr 18 17:37 tier3.deps.txt
+-rwxrwxrwx 1 root root   49920 Apr 18 17:37 tier3.so
+-rw-rw-rw- 1 root root     733 Apr 18 17:37 tier4.deps.txt
+-rwxrwxrwx 1 root root  148336 Apr 18 17:37 tier4.so
+---
+# finished: 2026-04-18T17:37:43Z
