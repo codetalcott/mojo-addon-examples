@@ -1,19 +1,14 @@
 # Spike Findings Log
 
-Living document — updated as each gate resolves. Separate from
-[ideas/embedding-kernel-spike-plan.md](../../../ideas/embedding-kernel-spike-plan.md)
-(the plan, mostly static) and
-[ideas/killer-kernel-and-agent-cli.md](../../../ideas/killer-kernel-and-agent-cli.md)
-(the thesis, also static).
+Execution log from the embedding-kernel spike. Archived after productization as [`packages/embed/`](../packages/embed/).
 
-Captures what the spike actually discovered, which often differs from what the
-plan assumed. Anyone reviving this spike in six months should read this first.
+Captures what the spike actually discovered, which often differs from what the plan assumed — MAX v26 API surfaces, Mojo↔Python interop patterns, cold-start JIT behavior, and warm-path numbers against a CPU/ONNX reference.
 
 ---
 
 ## Day 0 — infrastructure
 
-- **Lambda Cloud had no H100 capacity** when the spike started. Switched to RunPod on 2026-04-16. $300 Lambda credit sunk; kept `scripts/lambda-bench.sh` in the tree in case capacity returns.
+- **Lambda Cloud had no H100 capacity** when the spike started. Switched to RunPod on 2026-04-16. Kept `scripts/lambda-bench.sh` in the tree in case capacity returns.
 - **RunPod Secure Cloud H100 SXM is ~$2.99/hr** in US-NE-1, US-MO-1, US-CA-2 (as of 2026-04-16). "Low" stock reported by the API sometimes means zero — capacity probe with a real launch was the only reliable signal.
 - **Mojo-addon-examples repo structure now assumes pods** — `scripts/bootstrap.sh` is the canonical pod-side session setup; seeded onto RunPod Network Volumes at `/workspace/persist/bootstrap.sh`.
 - **Pod cold-start ~30s** after pixi env is cached on the Network Volume. First cold build of `packages/rag` + `spike` is ~30s with cache, ~5 min without.
@@ -52,7 +47,7 @@ Python-interop F1 validation script: [`spike/probe_dlpack.py`](probe_dlpack.py).
 
 **`Accelerator()` on Apple M4 raises** `"Not implemented for device: Apple M4"`. MAX CPU path works locally (Python-level graph construction + CPU execute OK), but any GPU work must happen on RunPod.
 
-Impact on plan: the "M4 for correctness, RunPod for bench" split from the original plan gets revised. **All GPU correctness iteration happens on RunPod.** Cost stays manageable because pod launches are ~$0.15 per round-trip, and $300 remaining in the budget covers 40+ hours.
+Impact on plan: the "M4 for correctness, RunPod for bench" split from the original plan gets revised. **All GPU correctness iteration happens on RunPod.** Cost stays manageable because pod launches are ~$0.15 per round-trip.
 
 ## Day 1 — MAX v26 API cheat sheet
 
@@ -371,19 +366,7 @@ Tokenize is 4% of total latency — not a bottleneck. F3's 20 ms budget had
 
 ## Day 10 — writeup complete
 
-See [`ideas/embedding-kernel-spike-writeup.md`](../../../ideas/embedding-kernel-spike-writeup.md)
-for the portfolio-level GO/NO-GO artifact. Spike ends here; next steps are
-in Phase 1 of the productization plan.
-
-**Verdict: GO** on the killer-kernel path.
-
-**For the tactical 2–4 week plan following this spike**, see
-[`ideas/post-spike-next-steps.md`](../../../ideas/post-spike-next-steps.md)
-— critical path (promote `spike/` → `packages/embed/`, wire async N-API,
-resolve Modular license, MS-MARCO bench, publish writeup) plus parallel
-investigations and decision gates. The strategic 10-week plan in
-[`ideas/rag-productization.md`](../../../ideas/rag-productization.md) stays
-canonical; Phase 3b (embedding) is now pulled forward to Phase 1b.
+Spike verdict: **GO**. Productized as [`packages/embed/`](../packages/embed/) — promoted `spike/` to `packages/embed/`, wired async N-API variants, ran MS-MARCO warm-path benchmarks.
 
 ### Budget actuals
 
@@ -393,7 +376,3 @@ canonical; Phase 3b (embedding) is now pulled forward to Phase 1b.
 - Days elapsed: 2 (planned: 10 working days)
 
 Well under the budget ceiling the spike plan anticipated.
-
-## Day 10 — to be filled in
-
-(full demo + writeup + GO/NO-GO)
