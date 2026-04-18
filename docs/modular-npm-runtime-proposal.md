@@ -13,7 +13,7 @@ The Mojo compiler emits `.node` / `.dylib` / `.so` binaries that depend on a sma
 
 These are Mojo compiler runtime, not MAX-platform libs — a hello-world Mojo binary that uses `std.algorithm.parallelize` links the full set even with no GPU code. Any developer shipping a Mojo-compiled Node addon needs these at runtime.
 
-Today, the only way to get them is `pixi install max` (or `pip install modular`), which installs the whole MAX SDK (GBs). For Node addon authors, that's unacceptable install UX. The alternative — bundling the libs inside the addon package — has unresolved licensing status under the MCL's standalone-redistribution clause.
+Today, the only way to get them is `pixi install max` (or `pip install modular`), which installs the whole MAX SDK (GBs). For Node.js addon authors — the JavaScript / TypeScript server-side runtime's ecosystem, where esbuild, Prisma, Turbopack, and similar performance-sensitive native toolchains ship via `npm install` — that's unacceptable install UX. The alternative, bundling the libs inside the addon package, has unresolved licensing status under the MCL's standalone-redistribution clause.
 
 **This proposal: Modular publishes the Mojo compiler runtime as a small set of npm packages, analogous to `@esbuild/linux-x64`. Wm writes the packaging and CI; Modular reviews and holds publish credentials. Estimated effort: ~1 engineering week on Wm's side, ~2 hours of Modular review + npm token provisioning.**
 
