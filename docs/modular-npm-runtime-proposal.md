@@ -1,7 +1,5 @@
 # Proposal — publish `@modular/mojo-runtime-*` npm packages
 
-Companion to the licensing letter at [`modular-letter-draft-revised.md`](modular-letter-draft-revised.md). Shows Modular engineers — who are overloaded and unfamiliar with the Node ecosystem — exactly what the work looks like, what they own, and what Wm Talcott owns.
-
 ## Context
 
 The Mojo compiler emits `.node` / `.dylib` / `.so` binaries that depend on a small set of shared libraries:
@@ -13,11 +11,21 @@ The Mojo compiler emits `.node` / `.dylib` / `.so` binaries that depend on a sma
 - `libNVPTX` — CUDA/PTX driver glue
 - `libstdc++`, `libgcc_s` — C++ stdlib (Linux-bundled)
 
-The spike at [`../spikes/mojo-runtime/`](../spikes/mojo-runtime/) confirmed these are Mojo *compiler* runtime, not MAX-platform libs — a hello-world Mojo binary that uses `std.algorithm.parallelize` links the full set even with no GPU code. Any developer shipping a Mojo-compiled Node addon needs these at runtime.
+These are Mojo compiler runtime, not MAX-platform libs — a hello-world Mojo binary that uses `std.algorithm.parallelize` links the full set even with no GPU code. Any developer shipping a Mojo-compiled Node addon needs these at runtime.
 
 Today, the only way to get them is `pixi install max` (or `pip install modular`), which installs the whole MAX SDK (GBs). For Node addon authors, that's unacceptable install UX. The alternative — bundling the libs inside the addon package — has unresolved licensing status under the MCL's standalone-redistribution clause.
 
 **This proposal: Modular publishes the Mojo compiler runtime as a small set of npm packages, analogous to `@esbuild/linux-x64`. Wm writes the packaging and CI; Modular reviews and holds publish credentials. Estimated effort: ~1 engineering week on Wm's side, ~2 hours of Modular review + npm token provisioning.**
+
+## Why this matters for Modular
+
+This is the Node-ecosystem analog of Modular's existing `pip install modular` distribution — closing a structural gap that today blocks Mojo-compiled addons from reaching Node developers.
+
+- **Install UX gates everything.** A Mojo-compiled Node addon today requires users to first `pixi install max` (multi-GB SDK). There is no "just `npm install`" path. Every would-be Mojo-Node author hits this wall. A runtime package is the one missing piece between Mojo and the Node ecosystem.
+- **The bindings layer already exists.** [napi-mojo](https://github.com/codetalcott/napi-mojo) — ~140 exported functions, ~620 Jest tests, published to npm since early 2026 — is the framework for compiling Mojo into Node `.node` addons. The runtime-distribution story this proposal fills is what unblocks it at scale.
+- **Adoption compounds on existing pilots.** [`@qkstat/rag`](../packages/rag/) (sub-100 µs exact RAG at recall=1.0 on H100) and [`@qkstat/embed`](../packages/embed/) (MiniLM inference composed with rag in one Node process) are working proof points. A runtime package turns each into a live "Mojo made this faster in Node" demo shipping with the kind of perf numbers that are useful on Modular's marketing surface — and makes it easy for the next author to follow the pattern.
+- **Parity with the Python story.** `pip install modular` is already the canonical Python-side onboarding. `npm install @modular/mojo-runtime` gives Node the same shape. Symmetric across the two biggest AI/ML scripting ecosystems.
+- **Low downside.** ~1 week of external engineering, zero Mojo/MAX/compiler changes, reversible deprecation path. If adoption stalls at v0.1, the subpackages can be deprecated without Modular having committed to long-tail platforms.
 
 ## The proposal at a glance
 
