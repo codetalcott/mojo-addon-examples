@@ -324,7 +324,7 @@ Scripts supporting H100 cloud benchmark runs live in [`scripts/`](scripts/):
 
 Phase 3d and the spike established the pattern. Total cloud spend across all phase 3 work + spike: under $20.
 
-## When to Use Mojo
+## When Node.js developers should reach for Mojo
 
 V8's JIT compiler is already fast for scalar code. The matmul example shows this clearly: Mojo with the *same algorithm* is only 1.9-2.2x faster. A native addon has real costs -- build toolchain, N-API call overhead, platform-specific binaries. Mojo is worth reaching for when:
 
