@@ -3,7 +3,7 @@
 **Branch:** `spike/mojo-runtime-isolation`
 **Date:** 2026-04-17
 **Toolchain:** Mojo `0.26.3.0.dev2026041716`, M4 Metal (Darwin arm64)
-**Goal:** answer the user-question raised in [`/Users/williamtalcott/Downloads/modular-letter.txt`](../../../Downloads/modular-letter.txt) — *if Modular declines our request to bundle MAX runtime libs in `@qkstat/rag`, can we eliminate the MAX dependency by stripping `linalg` and `layout` and writing kernels against `std.gpu` only?*
+**Goal:** answer a question raised while drafting outreach to Modular's licensing team — *if Modular declines our request to bundle MAX runtime libs in `@qkstat/rag`, can we eliminate the MAX dependency by stripping `linalg` and `layout` and writing kernels against `std.gpu` only?*
 
 Short version: **the libs the letter assumed were "MAX runtime, target-agnostic" are actually Mojo compiler runtime, pulled in unconditionally by every Mojo binary including hello-world.** Stripping `linalg`/`layout` from the source does *not* change the dynamic-library footprint on Darwin/Metal. It does, however, change which `.mojopkg`s are touched at compile time — and that may matter independently for licensing.
 

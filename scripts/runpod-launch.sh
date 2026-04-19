@@ -274,7 +274,7 @@ CMD_B64=$(printf '%s' "$REMOTE_SCRIPT" | base64 | tr -d '\n')
 echo "[runpod] running (capture: $CAPTURE)"
 {
   echo "# runpod-launch.sh"
-  echo "# pod: $POD_ID  ssh: $IP:$PORT  gpu: $GPU_TYPE  cloud: $CLOUD_TYPE"
+  echo "# gpu: $GPU_TYPE  cloud: $CLOUD_TYPE"
   echo "# command: $COMMAND"
   echo "# started: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "---"

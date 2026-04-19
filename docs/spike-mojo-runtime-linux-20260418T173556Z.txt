@@ -1,5 +1,4 @@
 # runpod-launch.sh
-# pod: wkb1kr3vjgwb9n  ssh: 216.243.220.227:11719  gpu: NVIDIA H100 80GB HBM3  cloud: SECURE
 # command: git fetch origin && git checkout -B spike/mojo-runtime-isolation origin/spike/mojo-runtime-isolation && git reset --hard origin/spike/mojo-runtime-isolation && pixi install && bash spikes/mojo-runtime/build_and_inspect.sh && echo '=== tier0 deps ===' && cat spikes/mojo-runtime/build/tier0.deps.txt && echo '=== tier1 deps ===' && cat spikes/mojo-runtime/build/tier1.deps.txt && echo '=== tier2 deps ===' && cat spikes/mojo-runtime/build/tier2.deps.txt && echo '=== tier3 deps ===' && cat spikes/mojo-runtime/build/tier3.deps.txt && echo '=== tier4 deps ===' && cat spikes/mojo-runtime/build/tier4.deps.txt && echo '=== sizes ===' && ls -la spikes/mojo-runtime/build/
 # started: 2026-04-18T17:36:28Z
 ---
