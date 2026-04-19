@@ -2,6 +2,14 @@
 
 High-performance Node.js addon examples built with [napi-mojo](https://github.com/codetalcott/napi-mojo). Each example demonstrates Mojo's SIMD `vectorize()` and `parallelize()` through the N-API bridge, with benchmarks against pure JavaScript.
 
+## What's in this repo
+
+- [`examples/`](examples/) — Standalone Mojo + Node.js kernels (matmul, SIMD search, stats, image, wyhash) with per-example benchmarks on M4 Metal and H100.
+- [`packages/rag/`](packages/rag/) — `@qkstat/rag`, GPU exact-retrieval primitives (matmul + per-row top-k). 0.06 ms top-10 at recall 1.0 on MS-MARCO 10k (H100). Pre-release.
+- [`packages/embed/`](packages/embed/) — `@qkstat/embed`, MiniLM-L6-v2 embeddings on H100 via MAX + Python interop. Composes with `packages/rag` in one Node.js process. 1.36 ms p50 embed+search on 1k corpus. Pre-release.
+- [`spikes/mojo-runtime/`](spikes/mojo-runtime/) + [`docs/mojo-runtime-isolation-spike-findings.md`](docs/mojo-runtime-isolation-spike-findings.md) — Tiered-imports experiment isolating which Mojo runtime libraries a binary links against (five tiers, `ldd` captures).
+- [`scripts/`](scripts/) + [`docs/cloud-benchmark-runbook.md`](docs/cloud-benchmark-runbook.md) — RunPod orchestration for reproducing H100 benchmarks (~$1, ~30 min per run).
+
 ## Examples
 
 > **Benchmarking scope:** The primary CPU numbers in each table below are measured on an Apple M4. GPU rows report the M4's integrated GPU via Metal 4. A separate [H100 Cloud Benchmark Results](#h100-cloud-benchmark-results) section below reports results from an NVIDIA H100 80GB HBM3 (rented via RunPod). **Headline finding from the cloud runs**: for the single-shot GPU APIs that upload on every call, Mojo CPU SIMD beats Mojo GPU on every benchmark — on both M4 Metal *and* H100 CUDA — because the workload is PCIe-bound rather than HBM-bound. **Phase 3a flipped this** with a new persistent device buffer API (`loadGpu` / `countByteHandle` / `releaseGpu` in [simd-search](#simd-text-search--byte-level-pattern-matching)): on H100 the cached path reaches **1030× JS on 105 MB countByte, beating CPU SIMD by 30×**. See the [H100 Cloud Benchmark Results](#h100-cloud-benchmark-results) section and per-addon READMEs for the full teardown.
@@ -284,7 +292,7 @@ node examples/matmul/matmul_rag.js --fixture=msmarco-10k --full
 
 ### Package: `@qkstat/rag`
 
-Phase 3d primitives live in [`packages/rag/`](packages/rag/) as a sibling Node.js package — `v0.1.0-pre`, distributed separately from the root examples. Four GPU primitives (`loadMatrixGpu`, `matmulHandle`, `searchHandle`, `releaseMatrixGpu`) plus a thin `GpuIndex` helper. See [`packages/rag/README.md`](packages/rag/README.md).
+Phase 3d primitives live in [`packages/rag/`](packages/rag/) as a sibling Node.js package — `v0.1.0-pre`, distributed separately from the root examples. Four GPU primitives (`loadMatrixGpu`, `matmulHandle`, `searchHandle`, `releaseMatrixGpu`) plus a thin `GpuIndex` helper. See [`packages/rag/README.md`](packages/rag/README.md). The dynamic-library dependency analysis behind the package's distribution plan is documented in [`docs/mojo-runtime-isolation-spike-findings.md`](docs/mojo-runtime-isolation-spike-findings.md).
 
 ## `@qkstat/embed` — local GPU `embed + search` from Node
 
@@ -303,7 +311,7 @@ Corpus embed throughput (warm, batch-64): **5,137 docs/sec** at 10k. Correctness
 
 The two addons compose in one Node process with separate CUDA contexts — the "kernel-factory" thesis from the portfolio plan. Async variants (`matmulHandleAsync` / `searchHandleAsync` / `embedTokensAsync`) keep the event loop responsive under concurrent load (p99 event-loop jitter 1.43 ms on M4 Metal, 0 ms on H100 — below sampling floor — at 100 concurrent queries).
 
-See [`docs/embedding-kernel-spike-findings.md`](docs/embedding-kernel-spike-findings.md) for the day-by-day execution log and [`ideas/embedding-kernel-spike-writeup.md`](../../ideas/embedding-kernel-spike-writeup.md) for the GO/NO-GO decision artifact.
+See [`docs/embedding-kernel-spike-findings.md`](docs/embedding-kernel-spike-findings.md) for the day-by-day execution log.
 
 ## Pod-side infrastructure
 
@@ -334,7 +342,7 @@ V8's JIT compiler is already fast for scalar code. The matmul example shows this
 - Node.js 18+
 - **For GPU benchmarks on Apple Silicon:** Xcode with the Metal Toolchain component installed (`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer && xcodebuild -downloadComponent MetalToolchain`). Builds default to `--target-accelerator metal:4` on Darwin arm64; override per-addon with `STATS_ACCEL=""` etc. to build CPU-only.
 - **For GPU benchmarks on Linux/NVIDIA:** builds default to `--target-accelerator sm_90` (H100/H200). For other NVIDIA architectures, set `STATS_ACCEL="--target-accelerator sm_80"` (A100), `sm_89` (L40/RTX40), etc.
-- **Rented cloud GPU walkthrough:** see [docs/cloud-benchmark-runbook.md](docs/cloud-benchmark-runbook.md) for a ~30-minute Lambda Cloud H100 benchmark flow.
+- **Rented cloud GPU walkthrough:** see [docs/cloud-benchmark-runbook.md](docs/cloud-benchmark-runbook.md) for a ~30-minute RunPod H100 benchmark flow.
 
 ## Quick Start
 
