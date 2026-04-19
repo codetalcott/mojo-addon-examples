@@ -6,7 +6,7 @@ platforms = ["osx-arm64", "linux-64"]
 version = "0.1.0"
 
 [dependencies]
-max = ">=26.3.0.dev2026041605"
+max = ">=26.3.0.dev2026041716"
 nodejs = ">=22.12"
 # Deps for MAX's BertPipelineModel (sentence-transformers/all-MiniLM-L6-v2)
 # used by packages/embed. Needed to load the HF checkpoint through

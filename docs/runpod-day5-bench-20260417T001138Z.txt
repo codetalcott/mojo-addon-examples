@@ -1,5 +1,4 @@
 # runpod-launch.sh
-# pod: t1h78p0u35fkwu  ssh: 216.243.220.227:19164  gpu: NVIDIA H100 80GB HBM3  cloud: SECURE
 # command: cd /workspace/mojo-addon-examples && git fetch origin && git reset --hard origin/spike/embedding-kernel &&    echo '=== building rag + spike ===' &&    pixi run bash packages/rag/build.sh 2>&1 | grep -E 'error:|Build complete' | tail -1 &&    pixi run bash spike/build.sh 2>&1 | grep -E 'error:|Build complete' | tail -1 &&    echo '' && echo '=== Day 5 bench ===' &&    pixi run node spike/bench.js
 # started: 2026-04-17T00:11:54Z
 ---

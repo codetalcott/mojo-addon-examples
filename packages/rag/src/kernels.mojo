@@ -111,7 +111,7 @@ def _load_matrix_gpu(
 
     var dev_data = ctx.enqueue_create_buffer[dtype](num_elems)
     var staging = ctx.enqueue_create_host_buffer[dtype](num_elems)
-    var staging_ptr = staging.unsafe_ptr().value().bitcast[Byte]()
+    var staging_ptr = staging.unsafe_ptr().bitcast[Byte]()
     memcpy(dest=staging_ptr, src=src_bytes, count=num_bytes)
     ctx.enqueue_copy(dev_data, staging)
     ctx.synchronize()
@@ -167,7 +167,7 @@ def _matmul_cached(
     ctx.enqueue_copy(host_c, dev_c)
     ctx.synchronize()
 
-    var host_ptr = host_c.unsafe_ptr().value().bitcast[Byte]()
+    var host_ptr = host_c.unsafe_ptr().bitcast[Byte]()
     memcpy(dest=dst_bytes, src=host_ptr, count=c_elems * 4)
 
 
@@ -317,7 +317,7 @@ def _search_cached(
     ctx.enqueue_copy(host_c, dev_c)
     ctx.synchronize()
 
-    var host_ptr = host_c.unsafe_ptr().value()
+    var host_ptr = host_c.unsafe_ptr()
     for row in range(M):
         _topk_row(
             host_ptr + row * N,

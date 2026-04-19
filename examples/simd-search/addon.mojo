@@ -210,7 +210,7 @@ def _count_byte_gpu(
     ctx.enqueue_copy(host_partial, dev_partial)
     ctx.synchronize()
 
-    var ptr = host_partial.unsafe_ptr().value()
+    var ptr = host_partial.unsafe_ptr()
     var total: Int = 0
     for i in range(num_blocks):
         total += Int(ptr[i])

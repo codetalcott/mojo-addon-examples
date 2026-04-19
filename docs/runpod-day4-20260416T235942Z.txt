@@ -1,5 +1,4 @@
 # runpod-launch.sh
-# pod: ipreis9znkgdm9  ssh: 216.243.220.227:10101  gpu: NVIDIA H100 80GB HBM3  cloud: SECURE
 # command: cd /workspace/mojo-addon-examples && git fetch origin && git reset --hard origin/spike/embedding-kernel &&    echo '=== JS deps ===' &&    pixi run npm install --silent 2>&1 | tail -1 && (cd spike && pixi run npm install --silent 2>&1 | tail -1) &&    echo '=== building rag ===' && pixi run bash packages/rag/build.sh 2>&1 | grep -E 'error:|Build complete' | tail -1 &&    echo '=== building spike ===' && pixi run bash spike/build.sh 2>&1 | grep -E 'error:|Build complete' | tail -1 &&    echo '' && echo '===== DEMO (spike, GPU) =====' &&    pixi run node spike/demo.js &&    echo '' && echo '===== DEMO-REFERENCE (CPU ONNX) =====' &&    pixi run node spike/demo-reference.js
 # started: 2026-04-17T00:00:14Z
 ---

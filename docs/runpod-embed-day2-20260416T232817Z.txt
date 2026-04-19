@@ -1,5 +1,4 @@
 # runpod-launch.sh
-# pod: vk6shi7hq0981h  ssh: 216.243.220.227:19889  gpu: NVIDIA H100 80GB HBM3  cloud: SECURE
 # command: cd /workspace/mojo-addon-examples && git fetch origin && git reset --hard origin/spike/embedding-kernel && echo '=== running embed.py ===' && pixi run python spike/embed.py
 # started: 2026-04-16T23:28:49Z
 ---

@@ -1,5 +1,4 @@
 # runpod-launch.sh
-# pod: bmtdatv2rcrmib  ssh: 216.243.220.227:11513  gpu: NVIDIA H100 80GB HBM3  cloud: SECURE
 # command: cd /workspace/mojo-addon-examples && git fetch origin && git reset --hard origin/spike/embedding-kernel && pixi install 2>&1 | tail -3 && pixi run npm install 2>&1 | tail -5 && echo === BUILD packages/rag === && pixi run bash packages/rag/build.sh 2>&1 | tail -3 && echo === BUILD packages/embed === && pixi run bash packages/embed/build.sh 2>&1 | tail -3 && echo === G1 prep: reference.js CPU ground-truth === && pixi run node packages/embed/reference.js 2>&1 | tail -5 && echo === GATE G1: test-roundtrip.js === && pixi run node packages/embed/test-roundtrip.js && echo === MS-MARCO fixture build === && pixi run node scripts/build-msmarco-fixture.js --n=10000 --queries=200 2>&1 | tail -10 && echo === GATE G3: MS-MARCO bench === && pixi run node packages/embed/bench.js && echo === GATE G2 bonus on H100: async-load === && pixi run node packages/rag/tests/async-load.js
 # started: 2026-04-17T02:08:20Z
 ---
