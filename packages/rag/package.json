@@ -35,6 +35,7 @@
   "scripts": {
     "build": "bash build.sh",
     "bundle": "bash scripts/bundle-libs.sh",
+    "notice": "bash scripts/generate-notice.sh",
     "test": "jest tests/"
   },
   "devDependencies": {

@@ -6,7 +6,8 @@
   "files": [
     "rag.node",
     "gpu-libs/",
-    "README.md"
+    "README.md",
+    "NOTICE"
   ],
   "os": ["linux"],
   "cpu": ["x64"],
@@ -17,6 +18,9 @@
     "directory": "packages/rag/npm/linux-x64"
   },
   "license": "MIT",
+  "scripts": {
+    "prepack": "bash ../../scripts/generate-notice.sh"
+  },
   "publishConfig": {
     "access": "public"
   }

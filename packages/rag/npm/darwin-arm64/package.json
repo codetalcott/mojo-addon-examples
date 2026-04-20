@@ -5,7 +5,8 @@
   "main": "rag.node",
   "files": [
     "rag.node",
-    "README.md"
+    "README.md",
+    "NOTICE"
   ],
   "os": ["darwin"],
   "cpu": ["arm64"],
@@ -16,6 +17,9 @@
     "directory": "packages/rag/npm/darwin-arm64"
   },
   "license": "MIT",
+  "scripts": {
+    "prepack": "bash ../../scripts/generate-notice.sh"
+  },
   "publishConfig": {
     "access": "public"
   }

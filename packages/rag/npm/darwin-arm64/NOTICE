@@ -1,0 +1,21 @@
+NOTICE — @qkstat/rag (darwin-arm64)
+=================================
+
+This package includes software from Modular under two licenses.
+
+Modular Community License: compiled runtime libraries —
+libKGENCompilerRTShared, libAsyncRTMojoBindings,
+libAsyncRTRuntimeGlobals, libMSupportGlobals, libNVPTX (Linux only) —
+redistributed as part of this Application per MCL Section 3. Reachable
+only through this addon's rpath at $ORIGIN/gpu-libs, not standalone
+per 3(d). License: https://www.modular.com/legal/community
+
+Apache 2.0 with LLVM Exceptions: portions of the Mojo standard library
+(std.runtime, std.algorithm, std.memory, std.gpu, ...) and MAX AI
+kernels (linalg — ~98 KB static PTX for linalg::gemv::gemv_split_k)
+are embedded in the compiled addon binary.
+License: https://github.com/modular/modular/blob/main/LICENSE
+
+Versions: MAX 26.3.0.dev2026041716, Mojo 0.26.3.0.dev2026041716
+(regenerated per release from the installed pixi env —
+ see packages/rag/scripts/generate-notice.sh)
