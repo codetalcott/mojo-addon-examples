@@ -15,6 +15,7 @@ const key = `${process.platform}-${process.arch}`;
 const pkg = PLATFORMS[key];
 
 const { EmbeddingEngine } = require('./lib/EmbeddingEngine.js');
+const { RagPipeline } = require('./lib/RagPipeline.js');
 
 let addon;
 if (pkg) {
@@ -49,4 +50,5 @@ module.exports = {
   embedTokens: addon.embedTokens,
   embedTokensAsync: addon.embedTokensAsync,
   EmbeddingEngine,
+  RagPipeline,
 };

@@ -35,7 +35,8 @@
     "@qkstat/embed-linux-x64": "0.1.0-pre"
   },
   "dependencies": {
-    "@huggingface/transformers": "^4.1.0"
+    "@huggingface/transformers": "^4.1.0",
+    "@qkstat/rag": "0.1.0-pre"
   },
   "scripts": {
     "build": "bash build.sh",

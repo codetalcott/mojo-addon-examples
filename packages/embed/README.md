@@ -30,6 +30,24 @@ pixi run bash packages/embed/build.sh              # builds packages/embed/build
 
 ## Use
 
+End-to-end RAG in three lines via the bundled `RagPipeline` (composes embed + [`@qkstat/rag`](../rag) for you):
+
+```js
+const { RagPipeline } = require('@qkstat/embed');
+
+const pipe = new RagPipeline();
+await pipe.warmup();                          // pays MAX cold-start; idempotent
+await pipe.addTexts(docs);                    // embed corpus + build GpuIndex
+const hits = await pipe.search('how does auth work', 10);
+// → [{ doc, score, index }, ...] sorted desc
+
+pipe.close();
+```
+
+`RagPipeline` loads both `embed.node` and `rag.node` into the same Node process on separate CUDA contexts. `warmup()` is the right place to absorb the ~30 s MAX graph compile in a long-lived service (MCP daemon, watch-mode reindexer); after that, queries are warm-path.
+
+Just embeddings, no index:
+
 ```js
 const { EmbeddingEngine } = require('@qkstat/embed');
 
@@ -38,7 +56,7 @@ const embeddings = await engine.embed(['hello world', 'semantic search']);
 // Float32Array of length 2 * 384, row-major, L2-normalized
 ```
 
-Compose with [`@qkstat/rag`](../rag) for end-to-end GPU RAG:
+Bring-your-own index (e.g. you already have a `GpuIndex` instance, or you want a different vector store):
 
 ```js
 const { EmbeddingEngine } = require('@qkstat/embed');
@@ -51,8 +69,6 @@ const index = new GpuIndex({ docs, embeddings: corpusEmb, dim: 384 });
 const qEmb = await engine.embed([query]);
 const top10 = index.search(qEmb, 10);
 ```
-
-Both addons coexist in the same Node process on separate CUDA contexts.
 
 ## Raw primitive
 

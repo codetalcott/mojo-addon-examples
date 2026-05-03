@@ -29,6 +29,15 @@ class EmbeddingEngine {
       throw new Error('EmbeddingEngine: addon missing embedTokens — rebuild packages/embed');
     }
     this.dim = EMBED_DIM;
+    this._warmed = false;
+  }
+
+  // Pay the MAX cold-start explicitly so a long-lived service can do it at
+  // boot rather than on the first user query. Idempotent.
+  async warmup() {
+    if (this._warmed) return;
+    await this.embedAsync(['.']);
+    this._warmed = true;
   }
 
   async embed(texts) {
