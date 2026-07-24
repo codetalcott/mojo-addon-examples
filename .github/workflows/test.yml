@@ -48,5 +48,9 @@ jobs:
       - name: Build all examples
         run: pixi run bash -c "npm run build:all"
 
+      # TEMPORARY: localize the Linux-only image segfault. Remove before merge.
+      - name: Debug image segfault
+        run: pixi run bash scripts/debug-image-linux.sh
+
       - name: Run smoke tests
         run: pixi run bash -c "npm test"
