@@ -1,0 +1,102 @@
+# runpod-launch.sh
+# gpu: NVIDIA H100 80GB HBM3  cloud: SECURE
+# command: git fetch origin --prune && git checkout -B fix/mojo-nightly-2026072306 origin/fix/mojo-nightly-2026072306 && git log --oneline -1 && bash scripts/verify-gpu-h100.sh fix/mojo-nightly-2026072306
+# started: 2026-07-24T18:50:19Z
+---
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100 16555  100 16555    0     0  50607      0 --:--:-- --:--:-- --:--:-- 50472
+node v22.23.1  pixi pixi 0.73.0
+=== host 336f8f012a86 === Fri Jul 24 18:50:32 UTC 2026 ===
+NVIDIA H100 80GB HBM3, 81559 MiB
+=== command: git fetch origin --prune && git checkout -B fix/mojo-nightly-2026072306 origin/fix/mojo-nightly-2026072306 && git log --oneline -1 && bash scripts/verify-gpu-h100.sh fix/mojo-nightly-2026072306 ===
+Branch 'fix/mojo-nightly-2026072306' set up to track remote branch 'fix/mojo-nightly-2026072306' from 'origin'.
+Switched to a new branch 'fix/mojo-nightly-2026072306'
+b59f6c2 feat(scripts): add --no-volume mode to runpod-launch.sh
+############ environment ############
+Linux 336f8f012a86 6.8.0-106-generic #106-Ubuntu SMP PREEMPT_DYNAMIC Fri Mar  6 07:58:08 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+NVIDIA H100 80GB HBM3, 81559 MiB, 580.126.09
+
+############ sync repo to fix/mojo-nightly-2026072306 ############
+Branch 'fix/mojo-nightly-2026072306' set up to track remote branch 'fix/mojo-nightly-2026072306' from 'origin'.
+Your branch is up to date with 'origin/fix/mojo-nightly-2026072306'.
+Reset branch 'fix/mojo-nightly-2026072306'
+b59f6c2 feat(scripts): add --no-volume mode to runpod-launch.sh
+
+############ toolchain ############
+::: npm install
+    PASS
+::: pixi install
+    PASS
+napi-mojo: 0.6.0
+Mojo 1.0.0b3.dev2026072306 (1bf4c769)
+
+############ builds — GPU-bearing (sm_90) ############
+::: build matmul_cached
+    PASS
+::: build stats
+    PASS
+::: build stats_cached
+    PASS
+::: build image
+    PASS
+::: build image_cached
+    PASS
+::: build simd-search
+    PASS
+::: build search_cached
+    PASS
+::: build packages/rag
+    PASS
+
+############ builds — CPU-only ############
+::: build matmul
+    PASS
+::: build wyhash
+    PASS
+
+############ correctness ############
+::: npm test
+    FAIL — last 25 lines:
+scripts/verify-gpu-h100.sh: line 23:  2359 Segmentation fault      (core dumped) "$@" > /tmp/step.log 2>&1
+      
+      > mojo-addon-examples@0.1.0 test
+      > node examples/matmul/test.js && node examples/simd-search/test.js && node examples/stats/test.js && node examples/image/test.js && node examples/wyhash/test.js
+      
+      2404 external/tcmalloc+/tcmalloc/internal/system_allocator.h:713] Warning: Unable to mbind memory (errno=1, base=0x302840000000, nodemask=1)
+      matmul: OK
+      2434 external/tcmalloc+/tcmalloc/internal/system_allocator.h:713] Warning: Unable to mbind memory (errno=1, base=0x710140000000, nodemask=1)
+      simd-search: OK
+      2466 external/tcmalloc+/tcmalloc/internal/system_allocator.h:713] Warning: Unable to mbind memory (errno=1, base=0x132040000000, nodemask=1)
+      stats: OK
+      2498 external/tcmalloc+/tcmalloc/internal/system_allocator.h:713] Warning: Unable to mbind memory (errno=1, base=0x122700000000, nodemask=1)
+      Segmentation fault (core dumped)
+::: test search_cached
+    PASS
+::: jest packages/rag
+    PASS
+
+############ parallelize() thread dispatch ############
+2849 external/tcmalloc+/tcmalloc/internal/system_allocator.h:713] Warning: Unable to mbind memory (errno=1, base=0x7ab200000000, nodemask=2)
+  matmulTiled   : 31.7 ms
+  matmulParallel: 8.3 ms
+  speedup       : 3.81x -> threads dispatching
+
+############ summary ############
+PASS  npm install
+PASS  pixi install
+PASS  build matmul_cached
+PASS  build stats
+PASS  build stats_cached
+PASS  build image
+PASS  build image_cached
+PASS  build simd-search
+PASS  build search_cached
+PASS  build packages/rag
+PASS  build matmul
+PASS  build wyhash
+FAIL  npm test
+PASS  test search_cached
+PASS  jest packages/rag
+
+SOME FAILURES — see above
