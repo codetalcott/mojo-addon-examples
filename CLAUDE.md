@@ -9,8 +9,8 @@ High-performance Node.js addon examples written in Mojo and bridged to JS throug
 The repo is structured as three cohabiting things:
 
 - **`examples/`** — one directory per kernel (matmul, simd-search, stats, image, wyhash, rag-demo). Each is a self-contained Mojo addon + JS demo/bench/test.
-- **`packages/rag/`** — `@qkstat/rag`, a distributed Node package (GPU exact-retrieval primitives: `loadMatrixGpu` / `matmulHandle` / `searchHandle` / `releaseMatrixGpu` + `GpuIndex`). Has its own build, platform sub-packages under `npm/`, and Jest tests.
-- **`packages/embed/`** — `@qkstat/embed`, MiniLM-L6-v2 embeddings on H100 via MAX + Python interop. Productized from the embedding-kernel spike (2026-04-17 GO verdict); composes with `packages/rag` at runtime in one Node process. Historical spike log at [`docs/embedding-kernel-spike-findings.md`](docs/embedding-kernel-spike-findings.md).
+- **`packages/retrieve/`** — `@qkstat/retrieve`, a distributed Node package (GPU exact-retrieval primitives: `loadMatrixGpu` / `matmulHandle` / `searchHandle` / `releaseMatrixGpu` + `GpuIndex`). Has its own build, platform sub-packages under `npm/`, and Jest tests.
+- **`packages/embed/`** — `@qkstat/embed`, MiniLM-L6-v2 embeddings on H100 via MAX + Python interop. Productized from the embedding-kernel spike (2026-04-17 GO verdict); composes with `packages/retrieve` at runtime in one Node process. Historical spike log at [`docs/embedding-kernel-spike-findings.md`](docs/embedding-kernel-spike-findings.md).
 
 The `@qkstat` landing page at [qkstat.dev](https://qkstat.dev) is built from a separate repo (`qkstat-site`, Eleventy + Fly.io + Cloudflare). When a new package publishes or benchmark numbers change, `src/_data/packages.yaml` in that repo is the single maintenance surface — add an entry or flip `status: pre-release` → `published`.
 
@@ -36,14 +36,14 @@ pixi run bash examples/simd-search/build_cached.sh
 pixi run bash examples/stats/build_cached.sh
 pixi run bash examples/image/build_cached.sh
 
-# packages/rag — built and tested separately
-pixi run bash packages/rag/build.sh
-(cd packages/rag && npm test)                 # Jest
+# packages/retrieve — built and tested separately
+pixi run bash packages/retrieve/build.sh
+(cd packages/retrieve && npm test)                 # Jest
 
-# packages/embed — built separately; depends on packages/rag being built first
-pixi run bash packages/rag/build.sh && pixi run bash packages/embed/build.sh
+# packages/embed — built separately; depends on packages/retrieve being built first
+pixi run bash packages/retrieve/build.sh && pixi run bash packages/embed/build.sh
 pixi run node packages/embed/test-roundtrip.js   # Gate F4 correctness
-pixi run node packages/embed/demo.js             # GPU end-to-end with packages/rag
+pixi run node packages/embed/demo.js             # GPU end-to-end with packages/retrieve
 pixi run node packages/embed/bench.js            # MS-MARCO warm-path benchmarks
 
 # Correctness tests (root): runs all per-example test.js files
@@ -59,12 +59,12 @@ node examples/simd-search/test_cached.js      # cached-variant tests
 Each `build.sh` auto-selects a `--target-accelerator` and exposes an env var to override. Defaults:
 
 - Darwin arm64 → `metal:4`
-- Linux x86_64 → `sm_90` for most (H100/H200); `sm_80` for `packages/rag` (NVIDIA baseline, PTX forward-compat covers 80/86/89/90/100+ via driver JIT so one binary ships everywhere)
+- Linux x86_64 → `sm_90` for most (H100/H200); `sm_80` for `packages/retrieve` (NVIDIA baseline, PTX forward-compat covers 80/86/89/90/100+ via driver JIT so one binary ships everywhere)
 
 Override per addon:
 
 - `STATS_ACCEL`, `SEARCH_ACCEL`, `IMAGE_ACCEL`, `MATMUL_ACCEL` — per-example (empty string = CPU-only)
-- `QKSTAT_RAG_ACCEL` — for `packages/rag`
+- `QKSTAT_RETRIEVE_ACCEL` — for `packages/retrieve`
 - `EMBED_ACCEL` — for `packages/embed`
 
 On Linux x86_64, builds add `--mcpu haswell` to avoid AVX-512 instructions that break on older runners (e.g. GitHub Actions). AVX-512 is still used at runtime on hosts that support it for Mojo's SIMD width selection — the `--mcpu` flag only constrains the baseline.
@@ -95,17 +95,17 @@ Kernels use napi-mojo's framework: `napi.types`, `napi.framework.js_typedarray`,
 
 The benchmarking story the repo is *telling* is that single-call GPU APIs are PCIe-bound for low-arithmetic-intensity kernels. The fix is the **cached/handle API**: upload once (`loadGpu`), query many times (`countByteHandle`, `matmulHandle`, etc.), release (`releaseGpu`). This is where the 1000×+ speedups live (Phase 3a countByte, Phase 3c matmul). Details per-addon are in `README.md`; the root `README.md` has the cross-addon summary tables that are kept current with each phase.
 
-When adding a new GPU kernel, prefer the cached pattern if the input is large and queried repeatedly. The `packages/rag` module is the cleanest reference for the pattern.
+When adding a new GPU kernel, prefer the cached pattern if the input is large and queried repeatedly. The `packages/retrieve` module is the cleanest reference for the pattern.
 
-### `packages/rag` specifics
+### `packages/retrieve` specifics
 
-- Source: [`packages/rag/src/lib.mojo`](packages/rag/src/lib.mojo) (N-API surface) + `packages/rag/src/kernels.mojo`. Built with `-I src -I node_modules/napi-mojo/src` so `lib.mojo` can `from linalg import ...` from MAX.
-- Loader: [`packages/rag/index.js`](packages/rag/index.js) tries the platform sub-package (`@qkstat/rag-darwin-arm64` / `@qkstat/rag-linux-x64`), then falls back to the local `build/rag.node`. The sub-packages live under `packages/rag/npm/`; bundling is `bash scripts/bundle-libs.sh`.
-- Tests: Jest under `packages/rag/tests/`. They require the addon to be built first.
+- Source: [`packages/retrieve/src/lib.mojo`](packages/retrieve/src/lib.mojo) (N-API surface) + `packages/retrieve/src/kernels.mojo`. Built with `-I src -I node_modules/napi-mojo/src` so `lib.mojo` can `from linalg import ...` from MAX.
+- Loader: [`packages/retrieve/index.js`](packages/retrieve/index.js) tries the platform sub-package (`@qkstat/retrieve-darwin-arm64` / `@qkstat/retrieve-linux-x64`), then falls back to the local `build/retrieve.node`. The sub-packages live under `packages/retrieve/npm/`; bundling is `bash scripts/bundle-libs.sh`.
+- Tests: Jest under `packages/retrieve/tests/`. They require the addon to be built first.
 
 ### `packages/embed` specifics
 
-Composition model: `packages/embed/build/embed.node` (MAX Python interop for MiniLM) and `packages/rag/build/rag.node` (Mojo N-API matmul) load into the **same Node process** with **separate CUDA contexts**. This is the "kernel-factory" thesis the spike validated. The `embed_batch_from_addrs` path in `packages/embed/embed.py` is a raw-address memmove; DLPack zero-copy is a deferred optimization. [`docs/embedding-kernel-spike-findings.md`](docs/embedding-kernel-spike-findings.md) is the day-by-day execution log from the original spike (archived after productization).
+Composition model: `packages/embed/build/embed.node` (MAX Python interop for MiniLM) and `packages/retrieve/build/retrieve.node` (Mojo N-API matmul) load into the **same Node process** with **separate CUDA contexts**. This is the "kernel-factory" thesis the spike validated. The `embed_batch_from_addrs` path in `packages/embed/embed.py` is a raw-address memmove; DLPack zero-copy is a deferred optimization. [`docs/embedding-kernel-spike-findings.md`](docs/embedding-kernel-spike-findings.md) is the day-by-day execution log from the original spike (archived after productization).
 
 The Mojo addon imports its Python module by inserting `packages/embed` into `sys.path` at runtime — handles both pod (`/workspace/mojo-addon-examples/packages/embed`) and laptop (relative `packages/embed`) paths. See [`packages/embed/src/embed.mojo`](packages/embed/src/embed.mojo) `_import_embed_module`.
 
@@ -116,7 +116,7 @@ The repo root's `pixi.toml` includes `transformers`, `safetensors`, etc. specifi
 - **Mojo version pin** lives in `pixi.toml` (`max = ">=26.3.0.dev..."`). Upgrading is scripted by `scripts/update-mojo-version.sh`.
 - **Apple Silicon GPU benchmarks** require Xcode's Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`). Without it, GPU builds on Darwin fail at link time.
 - **MAX on M4 is currently CPU-only for `packages/embed`** — `Accelerator()` init returns "Not implemented for device: Apple M4". All embed GPU iteration happens on RunPod.
-- **Node version**: `engines.node >=22.12` in `packages/rag`. Root examples also assume that.
+- **Node version**: `engines.node >=22.12` in `packages/retrieve`. Root examples also assume that.
 - **Build outputs are git-ignored** (`build/*.node`, fixtures). Don't commit them.
 
 ## napi-mojo linkage

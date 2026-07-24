@@ -18,7 +18,7 @@
 const path = require('path');
 const fs = require('fs');
 const { tokenize } = require('./tokenize');
-const { GpuIndex } = require('../rag/lib/GpuIndex');
+const { GpuIndex } = require('../retrieve/lib/GpuIndex');
 
 const EMBED_DIM = 384;
 const K = 10;

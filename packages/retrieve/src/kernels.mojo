@@ -1,4 +1,4 @@
-## packages/rag/src/kernels.mojo — GPU matmul + top-k retrieval primitives
+## packages/retrieve/src/kernels.mojo — GPU matmul + top-k retrieval primitives
 ##
 ## Public API (registered onto ModuleBuilder by register_gpu_linalg):
 ##   loadMatrixGpu(f32Array, rows, cols)         -> External handle (CachedMatrix)

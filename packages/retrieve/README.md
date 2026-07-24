@@ -1,4 +1,4 @@
-# @qkstat/rag
+# @qkstat/retrieve
 
 GPU-accelerated exact-retrieval RAG primitives for Node.js, built in Mojo.
 
@@ -11,13 +11,13 @@ Cached GPU matmul + fused host-side top-k — the building blocks for semantic s
 ## Install
 
 ```bash
-npm install @qkstat/rag
+npm install @qkstat/retrieve
 ```
 
 Platform prebuilts (not yet published to npm):
 
-- `@qkstat/rag-darwin-arm64` — Apple Silicon (Metal)
-- `@qkstat/rag-linux-x64` — Linux x86_64 (NVIDIA, any compute capability ≥ 8.0 via driver PTX JIT)
+- `@qkstat/retrieve-darwin-arm64` — Apple Silicon (Metal)
+- `@qkstat/retrieve-linux-x64` — Linux x86_64 (NVIDIA, any compute capability ≥ 8.0 via driver PTX JIT)
 
 Until prebuilts ship, build from source from the monorepo:
 
@@ -25,13 +25,13 @@ Until prebuilts ship, build from source from the monorepo:
 git clone https://github.com/codetalcott/mojo-addon-examples
 cd mojo-addon-examples
 npm install                                        # pulls napi-mojo framework
-pixi run bash packages/rag/build.sh                # builds packages/rag/build/rag.node
+pixi run bash packages/retrieve/build.sh                # builds packages/retrieve/build/retrieve.node
 ```
 
 ## Use
 
 ```js
-const { GpuIndex } = require('@qkstat/rag');
+const { GpuIndex } = require('@qkstat/retrieve');
 
 // embeddings is a Float32Array of length docs.length * dim, row-major.
 // L2-normalize each row for cosine similarity.
@@ -48,7 +48,7 @@ index.close();
 Or use the raw primitives directly:
 
 ```js
-const { loadMatrixGpu, matmulHandle, searchHandle, releaseMatrixGpu } = require('@qkstat/rag');
+const { loadMatrixGpu, matmulHandle, searchHandle, releaseMatrixGpu } = require('@qkstat/retrieve');
 
 const hCorpus = loadMatrixGpu(corpusColMajor, dim, N);  // one-time H2D
 const hQuery = loadMatrixGpu(queryRowMajor, B, dim);

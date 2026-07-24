@@ -1,13 +1,13 @@
 // packages/embed/demo.js — end-to-end demo.
 //
 // @qkstat/embed (MAX on H100 via Python interop) embeds 1000 docs,
-// @qkstat/rag's GpuIndex does exact cosine search, queries run,
+// @qkstat/retrieve's GpuIndex does exact cosine search, queries run,
 // accuracy + latency reported.
 
 const path = require('path');
 const { tokenize } = require('./tokenize');
 const { buildCorpus, buildQueries } = require('./corpus');
-const { GpuIndex } = require('../rag/lib/GpuIndex');
+const { GpuIndex } = require('../retrieve/lib/GpuIndex');
 
 const EMBED_DIM = 384;
 const K = 10;
@@ -45,7 +45,7 @@ async function main() {
   const embedMs = performance.now() - tEmbedStart;
   console.log(`corpus embed time: ${embedMs.toFixed(0)}ms  (${(docs.length * 1000 / embedMs).toFixed(0)} docs/sec)`);
 
-  console.log('\nbuilding GpuIndex (corpus → separate CUDA context for packages/rag)...');
+  console.log('\nbuilding GpuIndex (corpus → separate CUDA context for packages/retrieve)...');
   const tIdxStart = performance.now();
   const index = new GpuIndex({ docs, embeddings, dim: EMBED_DIM });
   console.log(`GpuIndex build: ${(performance.now() - tIdxStart).toFixed(1)}ms`);
@@ -98,7 +98,7 @@ async function main() {
   const pct = (100 * totalHits / (queries.length * K)).toFixed(1);
 
   console.log('\n==========================');
-  console.log('SUMMARY — @qkstat/embed (MAX on H100 + @qkstat/rag exact search)');
+  console.log('SUMMARY — @qkstat/embed (MAX on H100 + @qkstat/retrieve exact search)');
   console.log('==========================');
   console.log(`corpus: ${docs.length} docs, ${clusterNames.length} clusters`);
   console.log(`corpus embed throughput: ${(docs.length * 1000 / embedMs).toFixed(0)} docs/sec  (${embedMs.toFixed(0)}ms total)`);

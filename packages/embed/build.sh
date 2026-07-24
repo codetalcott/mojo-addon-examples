@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build script for @qkstat/embed.
 # Compiles packages/embed/src/lib.mojo into packages/embed/build/embed.node.
-# Mirrors packages/rag/build.sh — same pixi env, same napi-mojo framework.
+# Mirrors packages/retrieve/build.sh — same pixi env, same napi-mojo framework.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

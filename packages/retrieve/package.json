@@ -1,5 +1,5 @@
 {
-  "name": "@qkstat/rag",
+  "name": "@qkstat/retrieve",
   "version": "0.1.0-pre",
   "description": "GPU-accelerated exact-retrieval RAG primitives for Node.js — cached matmul + fused top-k, written in Mojo.",
   "main": "index.js",
@@ -13,7 +13,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/codetalcott/mojo-addon-examples.git",
-    "directory": "packages/rag"
+    "directory": "packages/retrieve"
   },
   "homepage": "https://qkstat.com",
   "bugs": "https://github.com/codetalcott/mojo-addon-examples/issues",
@@ -29,8 +29,8 @@
   ],
   "license": "MIT",
   "optionalDependencies": {
-    "@qkstat/rag-darwin-arm64": "0.1.0-pre",
-    "@qkstat/rag-linux-x64": "0.1.0-pre"
+    "@qkstat/retrieve-darwin-arm64": "0.1.0-pre",
+    "@qkstat/retrieve-linux-x64": "0.1.0-pre"
   },
   "scripts": {
     "build": "bash build.sh",

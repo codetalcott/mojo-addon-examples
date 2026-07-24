@@ -1,6 +1,6 @@
 // examples/rag-demo/search.js — local RAG search in ~30 lines of Node.
 //
-// Uses @qkstat/rag's GpuIndex helper — a thin wrapper around the four GPU
+// Uses @qkstat/retrieve's GpuIndex helper — a thin wrapper around the four GPU
 // primitives (loadMatrixGpu / matmulHandle / searchHandle / releaseMatrixGpu)
 // that handles the row-major→column-major transpose and returns result
 // objects with doc, score, and index.
@@ -8,7 +8,7 @@
 // Run: node examples/rag-demo/search.js
 // Flags: --corpus=N (default 10000), --dim=D (default 768), --k=K (default 10)
 
-const { GpuIndex } = require('@qkstat/rag');
+const { GpuIndex } = require('@qkstat/retrieve');
 
 function parseFlag(name, fallback) {
   const a = process.argv.find((s) => s.startsWith(`--${name}=`));
