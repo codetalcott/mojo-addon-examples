@@ -1,4 +1,4 @@
-NOTICE — @qkstat/rag (darwin-arm64)
+NOTICE — @qkstat/retrieve (darwin-arm64)
 =================================
 
 This package includes software from Modular under two licenses.
@@ -18,4 +18,4 @@ License: https://github.com/modular/modular/blob/main/LICENSE
 
 Versions: MAX 26.3.0.dev2026041716, Mojo 0.26.3.0.dev2026041716
 (regenerated per release from the installed pixi env —
- see packages/rag/scripts/generate-notice.sh)
+ see packages/retrieve/scripts/generate-notice.sh)

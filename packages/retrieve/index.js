@@ -1,14 +1,14 @@
-// @qkstat/rag — platform loader
+// @qkstat/retrieve — platform loader
 //
-// Each @qkstat/rag-<platform> sub-package ships a prebuilt rag.node (plus
+// Each @qkstat/retrieve-<platform> sub-package ships a prebuilt retrieve.node (plus
 // bundled runtime libs on Linux). This glue package resolves the right one
 // and falls back to a local source build for development.
 
 const path = require('path');
 
 const PLATFORMS = {
-  'darwin-arm64': '@qkstat/rag-darwin-arm64',
-  'linux-x64': '@qkstat/rag-linux-x64',
+  'darwin-arm64': '@qkstat/retrieve-darwin-arm64',
+  'linux-x64': '@qkstat/retrieve-linux-x64',
 };
 
 const key = `${process.platform}-${process.arch}`;
@@ -23,12 +23,12 @@ if (pkg) {
   } catch {
     // Platform package not installed — fall back to local build (dev).
     try {
-      addon = require(path.join(__dirname, 'build', 'rag.node'));
+      addon = require(path.join(__dirname, 'build', 'retrieve.node'));
     } catch {
       throw new Error(
-        `@qkstat/rag: no prebuilt for ${key}, and no local build at ` +
-          `packages/rag/build/rag.node. Install from npm (\`npm i @qkstat/rag\`) ` +
-          `or build from source: \`pixi run bash packages/rag/build.sh\` ` +
+        `@qkstat/retrieve: no prebuilt for ${key}, and no local build at ` +
+          `packages/retrieve/build/retrieve.node. Install from npm (\`npm i @qkstat/retrieve\`) ` +
+          `or build from source: \`pixi run bash packages/retrieve/build.sh\` ` +
           `(requires Mojo nightly + MAX via pixi).`,
       );
     }
@@ -36,10 +36,10 @@ if (pkg) {
 } else {
   // Unsupported platform — attempt local build only.
   try {
-    addon = require(path.join(__dirname, 'build', 'rag.node'));
+    addon = require(path.join(__dirname, 'build', 'retrieve.node'));
   } catch {
     throw new Error(
-      `@qkstat/rag: unsupported platform ${key}. ` +
+      `@qkstat/retrieve: unsupported platform ${key}. ` +
         `Supported: ${Object.keys(PLATFORMS).join(', ')}.`,
     );
   }

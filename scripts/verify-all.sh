@@ -3,7 +3,7 @@
 #
 # The comprehensive gate. CI cannot be this thorough: hosted runners have no
 # NVIDIA GPU (ubuntu) and unproven Metal-in-a-VM (macos), so every GPU-execution
-# test in this repo — the four *_cached suites and packages/rag's Jest — can
+# test in this repo — the four *_cached suites and packages/retrieve's Jest — can
 # only run here or on a pod. CI is therefore compile-only; this script is where
 # GPU correctness is actually established before a push.
 #
@@ -111,8 +111,8 @@ step "build image_cached"  pixi run bash examples/image/build_cached.sh
 
 echo
 echo "############ builds — packages ############"
-# embed loads rag into the same process, so rag must build first.
-step "build packages/rag" pixi run bash packages/rag/build.sh
+# embed loads retrieve into the same process, so retrieve must build first.
+step "build packages/retrieve" pixi run bash packages/retrieve/build.sh
 if [ "$SKIP_EMBED" -eq 1 ]; then
   skip "build packages/embed" "--skip-embed"
 else
@@ -136,7 +136,7 @@ step "test image_cached"  pixi run node examples/image/test_cached.js
 
 echo
 echo "############ correctness — packages ############"
-step "jest packages/rag" bash -c "cd '$ROOT_DIR/packages/rag' && pixi run --manifest-path '$ROOT_DIR/pixi.toml' npm test"
+step "jest packages/retrieve" bash -c "cd '$ROOT_DIR/packages/retrieve' && pixi run --manifest-path '$ROOT_DIR/pixi.toml' npm test"
 if [ "$SKIP_EMBED" -eq 1 ]; then
   skip "test packages/embed" "--skip-embed"
 elif [ "$WITH_EMBED_TEST" -eq 1 ]; then

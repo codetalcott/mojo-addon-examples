@@ -6,8 +6,8 @@
 # the pin in pixi.toml.
 #
 # Run before `npm publish`:
-#   pixi run bash packages/rag/scripts/generate-notice.sh
-# or (from packages/rag/):
+#   pixi run bash packages/retrieve/scripts/generate-notice.sh
+# or (from packages/retrieve/):
 #   npm run notice
 set -euo pipefail
 
