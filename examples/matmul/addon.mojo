@@ -12,7 +12,7 @@
 ## Build:  pixi run bash matmul/build.sh
 ## Run:    node matmul/matmul.js
 
-from std.algorithm.functional import vectorize, parallelize
+from std.algorithm.functional import vectorize
 from std.sys import simd_width_of
 from std.memory import alloc
 
@@ -24,7 +24,7 @@ from napi.framework.js_int32 import JsInt32
 from napi.framework.js_typedarray import JsTypedArray
 from napi.framework.args import CbArgs
 from napi.framework.register import fn_ptr, ModuleBuilder
-from napi.framework.runtime import init_async_runtime
+from napi.framework.runtime import init_async_runtime, parallelize_safe
 
 
 # --- Helper: extract matmul args from JS -------------------------------------
@@ -37,7 +37,7 @@ def parse_matmul_args(b: Bindings, env: NapiEnv, info: NapiValue) raises -> Inli
     if argc < 6:
         raise Error("matmul requires 6 arguments: a, b, result, M, K, N")
     var argv_buf = alloc[NapiValue](6)
-    CbArgs.get_argv(b, env, info, 6, argv_buf)
+    CbArgs.get_argv(b, env, info, 6, argv_buf.as_unsafe_any_origin())
     var ta_a = JsTypedArray(argv_buf[0])
     var ta_b = JsTypedArray(argv_buf[1])
     var ta_out = JsTypedArray(argv_buf[2])
@@ -52,7 +52,7 @@ def parse_matmul_args(b: Bindings, env: NapiEnv, info: NapiValue) raises -> Inli
 
 def parse_dims(b: Bindings, env: NapiEnv, info: NapiValue) raises -> InlineArray[Int, 3]:
     var argv_buf = alloc[NapiValue](6)
-    CbArgs.get_argv(b, env, info, 6, argv_buf)
+    CbArgs.get_argv(b, env, info, 6, argv_buf.as_unsafe_any_origin())
     var M = Int(JsInt32.from_napi_value(b, env, argv_buf[3]))
     var K = Int(JsInt32.from_napi_value(b, env, argv_buf[4]))
     var N = Int(JsInt32.from_napi_value(b, env, argv_buf[5]))
@@ -88,7 +88,7 @@ def matmul_naive_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(bindings, env, 0.0).value
     except:
         throw_js_error(env, "matmulNaive failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- 2. Vectorized: SIMD inner loop ------------------------------------------
@@ -108,7 +108,7 @@ def _matmul_vectorized(
         for p in range(K):
             var a_ip = a[i * K + p]
             var row_b = p * N
-            def compute[width: Int](j: Int) unified {read}:
+            def compute[width: Int](j: Int) {imm b, imm c, imm row_b, imm row_c, imm a_ip}:
                 var b_chunk = b.load[width=width](row_b + j)
                 var c_chunk = c.load[width=width](row_c + j)
                 c.store[width=width](row_c + j, c_chunk + a_ip * b_chunk)
@@ -124,7 +124,7 @@ def matmul_vectorized_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(bindings, env, 0.0).value
     except:
         throw_js_error(env, "matmulVectorized failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- 3. Tiled: cache-friendly blocking ----------------------------------------
@@ -156,7 +156,7 @@ def _matmul_tiled(
                     for p in range(pp, p_end):
                         var a_ip = a[i * K + p]
                         var row_b = p * N + jj
-                        def compute[width: Int](j: Int) unified {read}:
+                        def compute[width: Int](j: Int) {imm b, imm c, imm row_b, imm row_c, imm a_ip}:
                             var b_chunk = b.load[width=width](row_b + j)
                             var c_chunk = c.load[width=width](row_c + j)
                             c.store[width=width](row_c + j, c_chunk + a_ip * b_chunk)
@@ -175,7 +175,7 @@ def matmul_tiled_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(bindings, env, 0.0).value
     except:
         throw_js_error(env, "matmulTiled failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- 4. Parallel: parallelize across tile rows --------------------------------
@@ -208,7 +208,7 @@ def _matmul_parallel(
                         for p in range(pp, p_end):
                             var a_ip = a[i * K + p]
                             var row_b = p * N + jj
-                            def compute[width: Int](j: Int) unified {read}:
+                            def compute[width: Int](j: Int) {imm b, imm c, imm row_b, imm row_c, imm a_ip}:
                                 var b_chunk = b.load[width=width](row_b + j)
                                 var c_chunk = c.load[width=width](row_c + j)
                                 c.store[width=width](row_c + j, c_chunk + a_ip * b_chunk)
@@ -216,7 +216,7 @@ def _matmul_parallel(
                     jj += TILE_SIZE
                 pp += TILE_SIZE
             ii += NUM_WORKERS * TILE_SIZE
-    parallelize[worker](NUM_WORKERS)
+    parallelize_safe[worker](NUM_WORKERS)
 
 
 def matmul_parallel_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -228,13 +228,13 @@ def matmul_parallel_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(bindings, env, 0.0).value
     except:
         throw_js_error(env, "matmulParallel failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- Module entry point -------------------------------------------------------
 
-@export("napi_register_module_v1", ABI="C")
-def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+@export("napi_register_module_v1")
+def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     try:
         init_async_runtime()
     except:
@@ -244,11 +244,11 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
-        bindings_ptr.init_pointee_move(bindings^)
+        bindings_ptr.unsafe_write(bindings^)
     except:
         bindings_ptr.free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]()
+    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
 
     var naive_ref = matmul_naive_fn
     var vec_ref = matmul_vectorized_fn

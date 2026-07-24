@@ -7,10 +7,10 @@
 ## Build:  pixi run bash stats/build.sh
 ## Run:    node stats/stats.js
 
-from std.algorithm.functional import vectorize, parallelize
+from std.algorithm.functional import vectorize
 from std.sys import simd_width_of
 from std.math import sqrt, ceildiv
-from std.memory import alloc, memcpy, stack_allocation
+from std.memory import alloc, unsafe_memcpy, stack_allocation
 from std.gpu import global_idx, thread_idx, block_idx, barrier
 from std.gpu.memory import AddressSpace
 from std.gpu.host import DeviceContext
@@ -26,7 +26,7 @@ from napi.framework.js_typedarray import JsTypedArray
 from napi.framework.js_arraybuffer import JsArrayBuffer
 from napi.framework.args import CbArgs
 from napi.framework.register import fn_ptr, ModuleBuilder
-from napi.framework.runtime import init_async_runtime
+from napi.framework.runtime import init_async_runtime, parallelize_safe
 
 
 # --- SIMD sum/min/max in one pass ---------------------------------------------
@@ -58,7 +58,7 @@ def _gpu_state_finalize(
     hint: OpaquePointer[MutAnyOrigin],
 ):
     var ptr = data.bitcast[GpuState]()
-    ptr.destroy_pointee()
+    ptr.unsafe_deinit_pointee()
     ptr.free()
 
 
@@ -66,8 +66,8 @@ def _get_gpu_state(
     b: Bindings, env: NapiEnv
 ) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
     """Fetch the cached GpuState pointer, or raise if GPU unavailable."""
-    var data = OpaquePointer[MutAnyOrigin]()
-    _ = raw_get_instance_data(b, env, UnsafePointer(to=data).bitcast[NoneType]())
+    var data = OpaquePointer[MutAnyOrigin](unsafe_from_address=Int(0))
+    _ = raw_get_instance_data(b, env, UnsafePointer(to=data).bitcast[NoneType]().as_unsafe_any_origin())
     if Int(data) == 0:
         raise Error("statsGpu requires a GPU (no accelerator found)")
     return data.bitcast[GpuState]()
@@ -80,7 +80,7 @@ def _simd_sum_min_max(
     var vmin: Float64 = data[start]
     var vmax: Float64 = data[start]
     var base = start
-    def compute[width: Int](offset: Int) unified {mut vsum, mut vmin, mut vmax, read data, read base}:
+    def compute[width: Int](offset: Int) {mut vsum, mut vmin, mut vmax, imm data, imm base}:
         var chunk = data.load[width=width](base + offset)
         vsum += chunk.reduce_add()
         var cmin = chunk.reduce_min()
@@ -112,7 +112,7 @@ def _parallel_sum_min_max(
         p_sum[wid] = partial[0]
         p_min[wid] = partial[1]
         p_max[wid] = partial[2]
-    parallelize[worker](NUM_WORKERS)
+    parallelize_safe[worker](NUM_WORKERS)
     var total_sum: Float64 = 0.0
     var total_min: Float64 = p_min[0]
     var total_max: Float64 = p_max[0]
@@ -138,7 +138,7 @@ def _simd_sum_sq_diff(
 ) -> Float64:
     var sum_sq: Float64 = 0.0
     var base = start
-    def compute[width: Int](offset: Int) unified {mut sum_sq, read data, read base, read mean}:
+    def compute[width: Int](offset: Int) {mut sum_sq, imm data, imm base, imm mean}:
         var chunk = data.load[width=width](base + offset)
         var diff = chunk - mean
         sum_sq += (diff * diff).reduce_add()
@@ -157,7 +157,7 @@ def _parallel_sum_sq_diff(
         var s = wid * chunk_size
         var e = s + chunk_size if wid < NUM_WORKERS - 1 else size
         partials[wid] = _simd_sum_sq_diff(data, s, e, mean)
-    parallelize[worker](NUM_WORKERS)
+    parallelize_safe[worker](NUM_WORKERS)
     var total: Float64 = 0.0
     for i in range(NUM_WORKERS):
         total += partials[i]
@@ -332,7 +332,7 @@ def _gpu_sum_min_max(
     var dev_pmin = ctx.enqueue_create_buffer[DType.float32](num_blocks)
     var dev_pmax = ctx.enqueue_create_buffer[DType.float32](num_blocks)
 
-    ctx.enqueue_function[_gpu_kernel_sum_min_max, _gpu_kernel_sum_min_max](
+    ctx.enqueue_function[_gpu_kernel_sum_min_max](
         dev_data.unsafe_ptr(),
         dev_psum.unsafe_ptr(),
         dev_pmin.unsafe_ptr(),
@@ -391,7 +391,7 @@ def _gpu_sum_sq_diff(
 
     var dev_partial = ctx.enqueue_create_buffer[DType.float32](num_blocks)
 
-    ctx.enqueue_function[_gpu_kernel_sum_sq_diff, _gpu_kernel_sum_sq_diff](
+    ctx.enqueue_function[_gpu_kernel_sum_sq_diff](
         dev_data.unsafe_ptr(),
         dev_partial.unsafe_ptr(),
         Float32(mean),
@@ -423,7 +423,7 @@ def _compute_stats_gpu(
     var sum_sq = _gpu_sum_sq_diff(ctx, data, size, mean)
     var stddev = sqrt(sum_sq / Float64(size))
 
-    var copy = alloc[Float64](size)
+    var copy = alloc[Float64](size).as_unsafe_any_origin()
     for i in range(size):
         copy[i] = data[i]
 
@@ -462,7 +462,7 @@ def _compute_stats(
     var stddev = sqrt(sum_sq / Float64(size))
 
     # Pass 3: Percentiles via quickselect on a copy
-    var copy = alloc[Float64](size)
+    var copy = alloc[Float64](size).as_unsafe_any_origin()
     for i in range(size):
         copy[i] = data[i]
 
@@ -493,12 +493,12 @@ def stats_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var b = r.b
         if not JsTypedArray.is_typedarray(b, env, r.arg0):
             throw_js_error(env, "stats requires a Float64Array argument")
-            return NapiValue()
+            return NapiValue(unsafe_from_address=Int(0))
         var ta = JsTypedArray(r.arg0)
         var size = Int(ta.length(b, env))
         if size == 0:
             throw_js_error(env, "stats requires non-empty array")
-            return NapiValue()
+            return NapiValue(unsafe_from_address=Int(0))
         var ptr = ta.data_ptr(b, env).bitcast[Float64]()
         var s = _compute_stats(ptr, size)
 
@@ -513,7 +513,7 @@ def stats_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return obj.value
     except:
         throw_js_error(env, "stats failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 def stats_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -522,12 +522,12 @@ def stats_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var b = r.b
         if not JsTypedArray.is_typedarray(b, env, r.arg0):
             throw_js_error(env, "statsGpu requires a Float64Array argument")
-            return NapiValue()
+            return NapiValue(unsafe_from_address=Int(0))
         var ta = JsTypedArray(r.arg0)
         var size = Int(ta.length(b, env))
         if size == 0:
             throw_js_error(env, "statsGpu requires non-empty array")
-            return NapiValue()
+            return NapiValue(unsafe_from_address=Int(0))
         var ptr = ta.data_ptr(b, env).bitcast[Float64]()
 
         # Retrieve the cached DeviceContext (set in register_module). Raises
@@ -546,7 +546,7 @@ def stats_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return obj.value
     except:
         throw_js_error(env, "statsGpu failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 def histogram_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -555,13 +555,13 @@ def histogram_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var b = r.b
         if not JsTypedArray.is_typedarray(b, env, r.arg0):
             throw_js_error(env, "histogram requires a Float64Array and bin count")
-            return NapiValue()
+            return NapiValue(unsafe_from_address=Int(0))
         var ta = JsTypedArray(r.arg0)
         var size = Int(ta.length(b, env))
         var bins = Int(JsInt32.from_napi_value(b, env, r.arg1))
         if size == 0 or bins <= 0:
             throw_js_error(env, "histogram requires non-empty array and positive bins")
-            return NapiValue()
+            return NapiValue(unsafe_from_address=Int(0))
         var ptr = ta.data_ptr(b, env).bitcast[Float64]()
 
         # Find min/max via SIMD
@@ -593,13 +593,13 @@ def histogram_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return result_ta.value
     except:
         throw_js_error(env, "histogram failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- Module entry point -------------------------------------------------------
 
-@export("napi_register_module_v1", ABI="C")
-def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+@export("napi_register_module_v1")
+def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     try:
         init_async_runtime()
     except:
@@ -609,28 +609,28 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
-        bindings_ptr.init_pointee_move(bindings^)
+        bindings_ptr.unsafe_write(bindings^)
     except:
         bindings_ptr.free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]()
+    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
 
     # Try to create and cache a DeviceContext. If no GPU is present this
     # raises and we skip the caching — statsGpu will then throw on invocation.
     try:
         var ctx = DeviceContext()
         var state_ptr = alloc[GpuState](1)
-        state_ptr.init_pointee_move(GpuState(ctx^))
+        state_ptr.unsafe_write(GpuState(ctx^))
         var fin_ref = _gpu_state_finalize
         var fin_ptr = UnsafePointer(to=fin_ref).bitcast[
             OpaquePointer[MutAnyOrigin]
         ]()[]
         _ = raw_set_instance_data(
-            bindings_ptr,
+            bindings_ptr.as_unsafe_any_origin(),
             env,
-            state_ptr.bitcast[NoneType](),
+            state_ptr.bitcast[NoneType]().as_unsafe_any_origin(),
             fin_ptr,
-            OpaquePointer[MutAnyOrigin](),
+            OpaquePointer[MutAnyOrigin](unsafe_from_address=Int(0)),
         )
     except:
         pass  # No GPU — CPU-only mode, statsGpu will throw on call.

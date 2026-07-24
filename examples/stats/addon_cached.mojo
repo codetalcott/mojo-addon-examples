@@ -31,7 +31,7 @@
 from std.algorithm.functional import vectorize
 from std.sys import simd_width_of
 from std.math import sqrt, ceildiv
-from std.memory import alloc, memcpy, stack_allocation
+from std.memory import alloc, unsafe_memcpy, stack_allocation
 from std.gpu import thread_idx, block_idx, barrier
 from std.gpu.memory import AddressSpace
 from std.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
@@ -130,6 +130,7 @@ struct CachedStats(Movable):
     var host_pmin: HostBuffer[DType.float32]
     var host_pmax: HostBuffer[DType.float32]
     var host_psq: HostBuffer[DType.float32]
+    @__allow_legacy_any_origin_fields
     var data_f64: UnsafePointer[Float64, MutAnyOrigin]
     var size: Int
     var num_blocks: Int
@@ -285,7 +286,7 @@ def _cast_f64_to_f32_simd(
     dst: UnsafePointer[Float32, MutAnyOrigin],
     size: Int,
 ):
-    def compute[width: Int](offset: Int) unified {read}:
+    def compute[width: Int](offset: Int) {imm src, imm dst}:
         var chunk = src.load[width=width](offset)
         dst.store[width=width](offset, chunk.cast[DType.float32]())
     vectorize[simd_width_of[DType.float64]()](size, compute)
@@ -306,7 +307,7 @@ def _load_stats_gpu(
     # Ephemeral pinned staging — vectorized cast writes into it, then H2D
     # uploads to dev_data. Dropped on return.
     var staging = ctx.enqueue_create_host_buffer[DType.float32](size)
-    _cast_f64_to_f32_simd(host_f64, staging.unsafe_ptr(), size)
+    _cast_f64_to_f32_simd(host_f64, staging.unsafe_ptr().as_unsafe_any_origin(), size)
     ctx.enqueue_copy(dev_data, staging)
 
     # Persistent reusable partial buffers (device + pinned host).
@@ -323,8 +324,8 @@ def _load_stats_gpu(
     ctx.synchronize()
 
     # Heap Float64 copy for CPU-side percentile quickselect.
-    var data_f64 = alloc[Float64](size)
-    memcpy(dest=data_f64, src=host_f64, count=size)
+    var data_f64 = alloc[Float64](size).as_unsafe_any_origin()
+    unsafe_memcpy(dest=data_f64, src=host_f64, count=size)
 
     return CachedStats(
         dev_data^,
@@ -359,7 +360,7 @@ def load_stats_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsExternal.create_typed(b, env, cs_val^).value
     except:
         throw_js_error(env, "loadStatsGpu failed (no GPU or upload error)")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- statsHandle: per-call GPU reductions + host percentiles -----------------
@@ -369,7 +370,7 @@ def _stats_cached(
     cs: UnsafePointer[CachedStats, MutAnyOrigin],
 ) raises -> InlineArray[Float64, 7]:
     # Pass 1: sum + min + max. Persistent buffers, no alloc, no H2D.
-    ctx.enqueue_function[_gpu_kernel_sum_min_max, _gpu_kernel_sum_min_max](
+    ctx.enqueue_function[_gpu_kernel_sum_min_max](
         cs[].dev_data.unsafe_ptr(),
         cs[].dev_psum.unsafe_ptr(),
         cs[].dev_pmin.unsafe_ptr(),
@@ -402,7 +403,7 @@ def _stats_cached(
     var mean = total_sum / Float64(cs[].size)
 
     # Pass 2: sum_sq_diff (requires mean).
-    ctx.enqueue_function[_gpu_kernel_sum_sq_diff, _gpu_kernel_sum_sq_diff](
+    ctx.enqueue_function[_gpu_kernel_sum_sq_diff](
         cs[].dev_data.unsafe_ptr(),
         cs[].dev_psq.unsafe_ptr(),
         Float32(mean),
@@ -422,8 +423,8 @@ def _stats_cached(
     # Pass 3: percentiles via quickselect on a scratch copy of the Float64
     # cache. Same as stats/addon.mojo _compute_stats — we don't mutate the
     # persistent data_f64 copy because quickselect is destructive.
-    var scratch = alloc[Float64](cs[].size)
-    memcpy(dest=scratch, src=cs[].data_f64, count=cs[].size)
+    var scratch = alloc[Float64](cs[].size).as_unsafe_any_origin()
+    unsafe_memcpy(dest=scratch, src=cs[].data_f64, count=cs[].size)
 
     var p50_idx = Int(Float64(cs[].size - 1) * 0.5)
     var p95_idx = Int(Float64(cs[].size - 1) * 0.95)
@@ -468,7 +469,7 @@ def stats_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return obj.value
     except:
         throw_js_error(env, "statsHandle failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- releaseStatsGpu: tombstone handle ---------------------------------------
@@ -484,13 +485,13 @@ def release_stats_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, 0.0).value
     except:
         throw_js_error(env, "releaseStatsGpu failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- Module entry point ------------------------------------------------------
 
-@export("napi_register_module_v1", ABI="C")
-def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+@export("napi_register_module_v1")
+def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     try:
         init_async_runtime()
     except:
@@ -500,15 +501,15 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
-        bindings_ptr.init_pointee_move(bindings^)
+        bindings_ptr.unsafe_write(bindings^)
     except:
         bindings_ptr.free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]()
+    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
 
     try:
         var ctx = DeviceContext()
-        set_instance_data(bindings_ptr, env, GpuState(ctx^))
+        set_instance_data(bindings_ptr.as_unsafe_any_origin(), env, GpuState(ctx^))
     except:
         pass
 

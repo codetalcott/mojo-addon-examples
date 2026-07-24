@@ -15,7 +15,7 @@
 ## Build: pixi run bash image/build_cached.sh
 
 from std.math import ceildiv
-from std.memory import alloc, memcpy
+from std.memory import alloc, unsafe_memcpy
 from std.gpu import global_idx
 from std.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
 
@@ -124,7 +124,7 @@ def _load_image_gpu(
 
     # Ephemeral pinned staging buffer — dropped on return.
     var staging = ctx.enqueue_create_host_buffer[DType.uint32](num_pixels)
-    memcpy(
+    unsafe_memcpy(
         dest=staging.unsafe_ptr().bitcast[Byte](),
         src=src_bytes,
         count=num_bytes,
@@ -156,7 +156,7 @@ def load_image_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsExternal.create_typed(b, env, ci_val^).value
     except:
         throw_js_error(env, "loadImageGpu failed (no GPU or upload error)")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- grayscaleHandle: query cached image ------------------------------------
@@ -167,7 +167,7 @@ def _grayscale_cached(
     dst_bytes: UnsafePointer[Byte, MutAnyOrigin],
 ) raises:
     var grid = ceildiv(ci[].num_pixels, GPU_BLOCK)
-    ctx.enqueue_function[_gpu_kernel_grayscale, _gpu_kernel_grayscale](
+    ctx.enqueue_function[_gpu_kernel_grayscale](
         ci[].src.unsafe_ptr(),
         ci[].dst.unsafe_ptr(),
         ci[].num_pixels,
@@ -177,7 +177,7 @@ def _grayscale_cached(
     ctx.enqueue_copy(ci[].host_dst, ci[].dst)
     ctx.synchronize()
 
-    memcpy(
+    unsafe_memcpy(
         dest=dst_bytes,
         src=ci[].host_dst.unsafe_ptr().bitcast[Byte](),
         count=ci[].num_bytes,
@@ -205,7 +205,7 @@ def grayscale_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, 0.0).value
     except:
         throw_js_error(env, "grayscaleHandle failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- releaseImageGpu: tombstone a handle ------------------------------------
@@ -221,13 +221,13 @@ def release_image_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, 0.0).value
     except:
         throw_js_error(env, "releaseImageGpu failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- Module entry point -----------------------------------------------------
 
-@export("napi_register_module_v1", ABI="C")
-def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+@export("napi_register_module_v1")
+def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     try:
         init_async_runtime()
     except:
@@ -237,16 +237,16 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
-        bindings_ptr.init_pointee_move(bindings^)
+        bindings_ptr.unsafe_write(bindings^)
     except:
         bindings_ptr.free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]()
+    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
 
     # Cache a DeviceContext if a GPU is available.
     try:
         var ctx = DeviceContext()
-        set_instance_data(bindings_ptr, env, GpuState(ctx^))
+        set_instance_data(bindings_ptr.as_unsafe_any_origin(), env, GpuState(ctx^))
     except:
         pass
 
