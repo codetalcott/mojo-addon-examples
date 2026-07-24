@@ -128,9 +128,14 @@ def _count_byte(
 ) -> Int:
     if size < PARALLEL_THRESHOLD:
         return _count_byte_range(data, target, 0, size)
-    var chunk_size = size // NUM_WORKERS
     var partials = alloc[Int](NUM_WORKERS)
     def worker(wid: Int) capturing:
+        # NOTE: derived inside the worker, not captured. Capturing a post-computed
+        # scalar local in a parallelize closure miscompiles on Linux x86_64
+        # (dev2026072306): the capture slot reads garbage on the AsyncRT thread.
+        # The compiler flags the bad pattern with "assignment to 'X' was never
+        # used" at the capture site. See commit message for the full forensics.
+        var chunk_size = size // NUM_WORKERS
         var s = wid * chunk_size
         var e = s + chunk_size if wid < NUM_WORKERS - 1 else size
         partials[wid] = _count_byte_range(data, target, s, e)

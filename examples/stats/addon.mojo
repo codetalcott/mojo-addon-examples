@@ -101,11 +101,16 @@ def _parallel_sum_min_max(
 ) -> InlineArray[Float64, 3]:
     if size < PARALLEL_THRESHOLD:
         return _simd_sum_min_max(data, 0, size)
-    var chunk_size = size // NUM_WORKERS
     var p_sum = alloc[Float64](NUM_WORKERS)
     var p_min = alloc[Float64](NUM_WORKERS)
     var p_max = alloc[Float64](NUM_WORKERS)
     def worker(wid: Int) capturing:
+        # NOTE: derived inside the worker, not captured. Capturing a post-computed
+        # scalar local in a parallelize closure miscompiles on Linux x86_64
+        # (dev2026072306): the capture slot reads garbage on the AsyncRT thread.
+        # The compiler flags the bad pattern with "assignment to 'X' was never
+        # used" at the capture site. See commit message for the full forensics.
+        var chunk_size = size // NUM_WORKERS
         var s = wid * chunk_size
         var e = s + chunk_size if wid < NUM_WORKERS - 1 else size
         var partial = _simd_sum_min_max(data, s, e)
@@ -151,9 +156,14 @@ def _parallel_sum_sq_diff(
 ) -> Float64:
     if size < PARALLEL_THRESHOLD:
         return _simd_sum_sq_diff(data, 0, size, mean)
-    var chunk_size = size // NUM_WORKERS
     var partials = alloc[Float64](NUM_WORKERS)
     def worker(wid: Int) capturing:
+        # NOTE: derived inside the worker, not captured. Capturing a post-computed
+        # scalar local in a parallelize closure miscompiles on Linux x86_64
+        # (dev2026072306): the capture slot reads garbage on the AsyncRT thread.
+        # The compiler flags the bad pattern with "assignment to 'X' was never
+        # used" at the capture site. See commit message for the full forensics.
+        var chunk_size = size // NUM_WORKERS
         var s = wid * chunk_size
         var e = s + chunk_size if wid < NUM_WORKERS - 1 else size
         partials[wid] = _simd_sum_sq_diff(data, s, e, mean)

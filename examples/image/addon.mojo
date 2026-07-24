@@ -95,8 +95,13 @@ def _grayscale_parallel(
     dst: UnsafePointer[Byte, MutAnyOrigin],
     width: Int, height: Int,
 ):
-    var rows_per = height // NUM_WORKERS
     def worker(wid: Int) capturing:
+        # NOTE: derived inside the worker, not captured. Capturing a post-computed
+        # scalar local in a parallelize closure miscompiles on Linux x86_64
+        # (dev2026072306): the capture slot reads garbage on the AsyncRT thread.
+        # The compiler flags the bad pattern with "assignment to 'X' was never
+        # used" at the capture site. See commit message for the full forensics.
+        var rows_per = height // NUM_WORKERS
         var s = wid * rows_per
         var e = s + rows_per if wid < NUM_WORKERS - 1 else height
         _grayscale_rows(src, dst, s, e, width)
@@ -197,8 +202,13 @@ def _brightness_parallel(
     dst: UnsafePointer[Byte, MutAnyOrigin],
     width: Int, height: Int, factor_fp: UInt32,
 ):
-    var rows_per = height // NUM_WORKERS
     def worker(wid: Int) capturing:
+        # NOTE: derived inside the worker, not captured. Capturing a post-computed
+        # scalar local in a parallelize closure miscompiles on Linux x86_64
+        # (dev2026072306): the capture slot reads garbage on the AsyncRT thread.
+        # The compiler flags the bad pattern with "assignment to 'X' was never
+        # used" at the capture site. See commit message for the full forensics.
+        var rows_per = height // NUM_WORKERS
         var s = wid * rows_per
         var e = s + rows_per if wid < NUM_WORKERS - 1 else height
         _brightness_rows(src, dst, s, e, width, factor_fp)
@@ -238,8 +248,13 @@ def _threshold_parallel(
     dst: UnsafePointer[Byte, MutAnyOrigin],
     width: Int, height: Int, thresh: Byte,
 ):
-    var rows_per = height // NUM_WORKERS
     def worker(wid: Int) capturing:
+        # NOTE: derived inside the worker, not captured. Capturing a post-computed
+        # scalar local in a parallelize closure miscompiles on Linux x86_64
+        # (dev2026072306): the capture slot reads garbage on the AsyncRT thread.
+        # The compiler flags the bad pattern with "assignment to 'X' was never
+        # used" at the capture site. See commit message for the full forensics.
+        var rows_per = height // NUM_WORKERS
         var s = wid * rows_per
         var e = s + rows_per if wid < NUM_WORKERS - 1 else height
         _threshold_rows(src, dst, s, e, width, thresh)
