@@ -11,7 +11,7 @@
 // without manually plumbing engine.embed() output into new GpuIndex({...}).
 
 const { EmbeddingEngine } = require('./EmbeddingEngine');
-const { GpuIndex } = require('@qkstat/rag');
+const { GpuIndex } = require('@qkstat/retrieve');
 
 const DEFAULT_BATCH = 64;
 const DEFAULT_DIM = 384;

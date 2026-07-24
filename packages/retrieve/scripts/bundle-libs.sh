@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Post-build rpath bundling — Linux only. Runs on CI after build.sh to
-# produce a self-contained Linux prebuilt: rag.node + gpu-libs/*.so with
+# produce a self-contained Linux prebuilt: retrieve.node + gpu-libs/*.so with
 # rpath set to $ORIGIN/gpu-libs so end users don't need pixi / MAX / CUDA
 # toolkit on their machine (just the NVIDIA driver, which every GPU host
 # has).
@@ -19,7 +19,7 @@ ROOT_DIR="$(cd "$PKG_DIR/../.." && pwd)"
 PIXI_LIB="$ROOT_DIR/.pixi/envs/default/lib"
 
 [ -d "$PIXI_LIB" ] || { echo "pixi env not installed at $PIXI_LIB — run: (cd $ROOT_DIR && pixi install)"; exit 1; }
-[ -f "$PKG_DIR/build/rag.node" ] || { echo "build/rag.node missing — run: bash build.sh first"; exit 1; }
+[ -f "$PKG_DIR/build/retrieve.node" ] || { echo "build/retrieve.node missing — run: bash build.sh first"; exit 1; }
 
 LIBS_DIR="$PKG_DIR/build/gpu-libs"
 mkdir -p "$LIBS_DIR"
@@ -44,7 +44,7 @@ for lib in "${LIBS[@]}"; do
   cp -L "$src" "$LIBS_DIR/"
 done
 
-patchelf --set-rpath '$ORIGIN/gpu-libs' "$PKG_DIR/build/rag.node"
+patchelf --set-rpath '$ORIGIN/gpu-libs' "$PKG_DIR/build/retrieve.node"
 
 echo "Bundled $(ls "$LIBS_DIR" | wc -l | tr -d ' ') libs into $LIBS_DIR/"
-echo "rpath on rag.node: $(patchelf --print-rpath "$PKG_DIR/build/rag.node")"
+echo "rpath on retrieve.node: $(patchelf --print-rpath "$PKG_DIR/build/retrieve.node")"

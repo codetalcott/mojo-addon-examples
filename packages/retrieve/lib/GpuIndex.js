@@ -10,14 +10,14 @@ function resolveAddon() {
   // Require with a lazy resolve so unit tests can inject their own addon.
   const pkg = process.platform + '-' + process.arch;
   const map = {
-    'darwin-arm64': '@qkstat/rag-darwin-arm64',
-    'linux-x64': '@qkstat/rag-linux-x64',
+    'darwin-arm64': '@qkstat/retrieve-darwin-arm64',
+    'linux-x64': '@qkstat/retrieve-linux-x64',
   };
   const platformPkg = map[pkg];
   if (platformPkg) {
     try { return require(platformPkg); } catch { /* fall through */ }
   }
-  return require(path.join(__dirname, '..', 'build', 'rag.node'));
+  return require(path.join(__dirname, '..', 'build', 'retrieve.node'));
 }
 
 class GpuIndex {

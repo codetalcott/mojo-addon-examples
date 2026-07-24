@@ -5,8 +5,8 @@ High-performance Node.js addon examples built with [napi-mojo](https://github.co
 ## What's in this repo
 
 - [`examples/`](examples/) — Standalone Mojo + Node.js kernels (matmul, SIMD search, stats, image, wyhash) with per-example benchmarks on M4 Metal and H100.
-- [`packages/rag/`](packages/rag/) — `@qkstat/rag`, GPU exact-retrieval primitives (matmul + per-row top-k). 0.06 ms top-10 at recall 1.0 on MS-MARCO 10k (H100). Pre-release.
-- [`packages/embed/`](packages/embed/) — `@qkstat/embed`, MiniLM-L6-v2 embeddings on H100 via MAX + Python interop. Composes with `packages/rag` in one Node.js process. 1.36 ms p50 embed+search on 1k corpus. Pre-release.
+- [`packages/retrieve/`](packages/retrieve/) — `@qkstat/retrieve`, GPU exact-retrieval primitives (matmul + per-row top-k). 0.06 ms top-10 at recall 1.0 on MS-MARCO 10k (H100). Pre-release.
+- [`packages/embed/`](packages/embed/) — `@qkstat/embed`, MiniLM-L6-v2 embeddings on H100 via MAX + Python interop. Composes with `packages/retrieve` in one Node.js process. 1.36 ms p50 embed+search on 1k corpus. Pre-release.
 - [`spikes/mojo-runtime/`](spikes/mojo-runtime/) + [`docs/mojo-runtime-isolation-spike-findings.md`](docs/mojo-runtime-isolation-spike-findings.md) — Tiered-imports experiment isolating which Mojo runtime libraries a binary links against (five tiers, `ldd` captures).
 - [`scripts/`](scripts/) + [`docs/cloud-benchmark-runbook.md`](docs/cloud-benchmark-runbook.md) — RunPod orchestration for reproducing H100 benchmarks (~$1, ~30 min per run).
 
@@ -290,13 +290,13 @@ node examples/matmul/matmul_rag.js --fixture=msmarco-10k --full
 
 3.3–29× faster than HNSW across all recall levels, with guaranteed exact recall. The "ANN tradeoff" evaporates when you have a GPU and a batch. See [docs/writeup-phase3d.md](docs/writeup-phase3d.md) for the full post and [docs/bench-rag-3d-h100-msmarco.txt](docs/bench-rag-3d-h100-msmarco.txt) for the raw capture.
 
-### Package: `@qkstat/rag`
+### Package: `@qkstat/retrieve`
 
-Phase 3d primitives live in [`packages/rag/`](packages/rag/) as a sibling Node.js package — `v0.1.0-pre`, distributed separately from the root examples. Four GPU primitives (`loadMatrixGpu`, `matmulHandle`, `searchHandle`, `releaseMatrixGpu`) plus a thin `GpuIndex` helper. See [`packages/rag/README.md`](packages/rag/README.md). The dynamic-library dependency analysis behind the package's distribution plan is documented in [`docs/mojo-runtime-isolation-spike-findings.md`](docs/mojo-runtime-isolation-spike-findings.md).
+Phase 3d primitives live in [`packages/retrieve/`](packages/retrieve/) as a sibling Node.js package — `v0.1.0-pre`, distributed separately from the root examples. Four GPU primitives (`loadMatrixGpu`, `matmulHandle`, `searchHandle`, `releaseMatrixGpu`) plus a thin `GpuIndex` helper. See [`packages/retrieve/README.md`](packages/retrieve/README.md). The dynamic-library dependency analysis behind the package's distribution plan is documented in [`docs/mojo-runtime-isolation-spike-findings.md`](docs/mojo-runtime-isolation-spike-findings.md).
 
 ## `@qkstat/embed` — local GPU `embed + search` from Node
 
-MiniLM-L6-v2 embeddings on H100 via MAX from inside a Node.js N-API addon, composable with `packages/rag`'s search path. Productized from a 2-day spike (GO verdict 2026-04-17); lives at [`packages/embed/`](packages/embed/).
+MiniLM-L6-v2 embeddings on H100 via MAX from inside a Node.js N-API addon, composable with `packages/retrieve`'s search path. Productized from a 2-day spike (GO verdict 2026-04-17); lives at [`packages/embed/`](packages/embed/).
 
 **MS-MARCO 10k on H100 80GB HBM3** — real passage embeddings (mean-pooled, L2-normalized MiniLM-L6-v2) via [`packages/embed/bench.js`](packages/embed/bench.js), capture at [`docs/bench-post-spike-h100-20260417T020804Z.txt`](docs/bench-post-spike-h100-20260417T020804Z.txt):
 
@@ -307,7 +307,7 @@ MiniLM-L6-v2 embeddings on H100 via MAX from inside a Node.js N-API addon, compo
 | 10k | 8 | **3.07 ms** | 3.43 | 4.96 | 0.74 ms |
 | 10k | 64 | 8.15 ms | 9.75 | 10.45 | 4.18 ms |
 
-Corpus embed throughput (warm, batch-64): **5,137 docs/sec** at 10k. Correctness vs. the `@huggingface/transformers` CPU reference: **0.999990 min cosine** across 100 sanity sentences. Recall is 1.0 by construction — `@qkstat/rag`'s `searchHandle` is exact (fused matmul + per-row top-k), no ANN tradeoff.
+Corpus embed throughput (warm, batch-64): **5,137 docs/sec** at 10k. Correctness vs. the `@huggingface/transformers` CPU reference: **0.999990 min cosine** across 100 sanity sentences. Recall is 1.0 by construction — `@qkstat/retrieve`'s `searchHandle` is exact (fused matmul + per-row top-k), no ANN tradeoff.
 
 The two addons compose in one Node process with separate CUDA contexts — the "kernel-factory" thesis from the portfolio plan. Async variants (`matmulHandleAsync` / `searchHandleAsync` / `embedTokensAsync`) keep the event loop responsive under concurrent load (p99 event-loop jitter 1.43 ms on M4 Metal, 0 ms on H100 — below sampling floor — at 100 concurrent queries).
 
