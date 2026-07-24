@@ -19,10 +19,10 @@
 ## error. Registration always succeeds so module load never fails.
 
 from std.math import ceildiv
-from std.memory import alloc, memcpy
+from std.memory import alloc, unsafe_memcpy
 from std.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
 
-from layout import Coord, Idx, TileTensor, row_major
+from layout import Coord, TileTensor, row_major
 from linalg.matmul import matmul as linalg_matmul
 
 from napi.types import (
@@ -112,7 +112,7 @@ def _load_matrix_gpu(
     var dev_data = ctx.enqueue_create_buffer[dtype](num_elems)
     var staging = ctx.enqueue_create_host_buffer[dtype](num_elems)
     var staging_ptr = staging.unsafe_ptr().bitcast[Byte]()
-    memcpy(dest=staging_ptr, src=src_bytes, count=num_bytes)
+    unsafe_memcpy(dest=staging_ptr, src=src_bytes, count=num_bytes)
     ctx.enqueue_copy(dev_data, staging)
     ctx.synchronize()
 
@@ -133,7 +133,7 @@ def load_matrix_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsExternal.create_typed(b, env, cm_val^).value
     except:
         throw_js_error(env, "loadMatrixGpu failed (no GPU or upload error)")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- matmulHandle: C = A × B using linalg.matmul ----------------------------
@@ -158,9 +158,9 @@ def _matmul_cached(
     var host_c = ctx.enqueue_create_host_buffer[dtype](c_elems)
 
     # Wrap persistent A, B and per-call C as TileTensors.
-    var tt_a = TileTensor[dtype](a[].dev_data, row_major(Coord(Idx(M), Idx(K))))
-    var tt_b = TileTensor[dtype](b[].dev_data, row_major(Coord(Idx(K), Idx(N))))
-    var tt_c = TileTensor[dtype](dev_c, row_major(Coord(Idx(M), Idx(N))))
+    var tt_a = TileTensor[dtype](a[].dev_data, row_major(Coord(M, K)))
+    var tt_b = TileTensor[dtype](b[].dev_data, row_major(Coord(K, N)))
+    var tt_c = TileTensor[dtype](dev_c, row_major(Coord(M, N)))
 
     linalg_matmul[target="gpu"](tt_c, tt_a, tt_b, Optional(ctx))
 
@@ -168,7 +168,7 @@ def _matmul_cached(
     ctx.synchronize()
 
     var host_ptr = host_c.unsafe_ptr().bitcast[Byte]()
-    memcpy(dest=dst_bytes, src=host_ptr, count=c_elems * 4)
+    unsafe_memcpy(dest=dst_bytes, src=host_ptr, count=c_elems * 4)
 
 
 def matmul_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -203,7 +203,7 @@ def matmul_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, 0.0).value
     except:
         throw_js_error(env, "matmulHandle failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- searchHandle: fused matmul + per-row top-k -----------------------------
@@ -308,16 +308,16 @@ def _search_cached(
     var dev_c = ctx.enqueue_create_buffer[dtype](c_elems)
     var host_c = ctx.enqueue_create_host_buffer[dtype](c_elems)
 
-    var tt_a = TileTensor[dtype](a[].dev_data, row_major(Coord(Idx(M), Idx(K))))
-    var tt_b = TileTensor[dtype](b[].dev_data, row_major(Coord(Idx(K), Idx(N))))
-    var tt_c = TileTensor[dtype](dev_c, row_major(Coord(Idx(M), Idx(N))))
+    var tt_a = TileTensor[dtype](a[].dev_data, row_major(Coord(M, K)))
+    var tt_b = TileTensor[dtype](b[].dev_data, row_major(Coord(K, N)))
+    var tt_c = TileTensor[dtype](dev_c, row_major(Coord(M, N)))
 
     linalg_matmul[target="gpu"](tt_c, tt_a, tt_b, Optional(ctx))
 
     ctx.enqueue_copy(host_c, dev_c)
     ctx.synchronize()
 
-    var host_ptr = host_c.unsafe_ptr()
+    var host_ptr = host_c.unsafe_ptr().as_unsafe_any_origin()
     for row in range(M):
         _topk_row(
             host_ptr + row * N,
@@ -370,7 +370,7 @@ def search_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, 0.0).value
     except:
         throw_js_error(env, "searchHandle failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- Async variants of matmulHandle / searchHandle --------------------------
@@ -399,14 +399,23 @@ struct MatmulAsyncData(Movable):
     # handles (trivially copyable OpaquePointer) and reconstitute JsRef() at
     # the complete-callback delete site. NapiRef is an alias for
     # OpaquePointer[MutAnyOrigin].
+    @__allow_legacy_any_origin_fields
     var deferred: NapiDeferred
+    @__allow_legacy_any_origin_fields
     var work: NapiAsyncWork
+    @__allow_legacy_any_origin_fields
     var a_ref: NapiRef
+    @__allow_legacy_any_origin_fields
     var b_ref: NapiRef
+    @__allow_legacy_any_origin_fields
     var dst_ref: NapiRef
+    @__allow_legacy_any_origin_fields
     var a_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin]
+    @__allow_legacy_any_origin_fields
     var b_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin]
+    @__allow_legacy_any_origin_fields
     var dst_ptr: UnsafePointer[Byte, MutAnyOrigin]
+    @__allow_legacy_any_origin_fields
     var state_ptr: UnsafePointer[GpuState, MutAnyOrigin]
     var had_error: Bool
 
@@ -420,8 +429,8 @@ struct MatmulAsyncData(Movable):
         dst_ptr: UnsafePointer[Byte, MutAnyOrigin],
         state_ptr: UnsafePointer[GpuState, MutAnyOrigin],
     ):
-        self.deferred = NapiDeferred()
-        self.work = NapiAsyncWork()
+        self.deferred = NapiDeferred(unsafe_from_address=Int(0))
+        self.work = NapiAsyncWork(unsafe_from_address=Int(0))
         self.a_ref = a_ref
         self.b_ref = b_ref
         self.dst_ref = dst_ref
@@ -485,7 +494,7 @@ def matmul_async_complete(
             )
     except:
         pass
-    ptr.destroy_pointee()
+    ptr.unsafe_deinit_pointee()
     ptr.free()
 
 
@@ -525,7 +534,7 @@ def matmul_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var dst_ref = JsRef.create(b, env, args[2], UInt32(1)).handle
 
         var data_ptr = alloc[MatmulAsyncData](1)
-        data_ptr.init_pointee_move(
+        data_ptr.unsafe_write(
             MatmulAsyncData(
                 a_ref, b_ref, dst_ref, a_ptr, b_ptr, dst_raw, state
             )
@@ -537,7 +546,7 @@ def matmul_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
             b,
             env,
             "matmulHandleAsync",
-            data_ptr.bitcast[NoneType](),
+            data_ptr.bitcast[NoneType]().as_unsafe_any_origin(),
             fn_ptr(exec_ref),
             fn_ptr(comp_ref),
         )
@@ -546,21 +555,32 @@ def matmul_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return aw.value
     except:
         throw_js_error(env, "matmulHandleAsync failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 struct SearchAsyncData(Movable):
     # See MatmulAsyncData for the NapiRef-instead-of-JsRef rationale.
+    @__allow_legacy_any_origin_fields
     var deferred: NapiDeferred
+    @__allow_legacy_any_origin_fields
     var work: NapiAsyncWork
+    @__allow_legacy_any_origin_fields
     var a_ref: NapiRef
+    @__allow_legacy_any_origin_fields
     var b_ref: NapiRef
+    @__allow_legacy_any_origin_fields
     var idx_ref: NapiRef
+    @__allow_legacy_any_origin_fields
     var scores_ref: NapiRef
+    @__allow_legacy_any_origin_fields
     var a_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin]
+    @__allow_legacy_any_origin_fields
     var b_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin]
+    @__allow_legacy_any_origin_fields
     var idx_ptr: UnsafePointer[UInt32, MutAnyOrigin]
+    @__allow_legacy_any_origin_fields
     var scores_ptr: UnsafePointer[Float32, MutAnyOrigin]
+    @__allow_legacy_any_origin_fields
     var state_ptr: UnsafePointer[GpuState, MutAnyOrigin]
     var k: Int
     var had_error: Bool
@@ -578,8 +598,8 @@ struct SearchAsyncData(Movable):
         state_ptr: UnsafePointer[GpuState, MutAnyOrigin],
         k: Int,
     ):
-        self.deferred = NapiDeferred()
-        self.work = NapiAsyncWork()
+        self.deferred = NapiDeferred(unsafe_from_address=Int(0))
+        self.work = NapiAsyncWork(unsafe_from_address=Int(0))
         self.a_ref = a_ref
         self.b_ref = b_ref
         self.idx_ref = idx_ref
@@ -655,7 +675,7 @@ def search_async_complete(
             )
     except:
         pass
-    ptr.destroy_pointee()
+    ptr.unsafe_deinit_pointee()
     ptr.free()
 
 
@@ -711,7 +731,7 @@ def search_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var scores_ref = JsRef.create(b, env, args[3], UInt32(1)).handle
 
         var data_ptr = alloc[SearchAsyncData](1)
-        data_ptr.init_pointee_move(
+        data_ptr.unsafe_write(
             SearchAsyncData(
                 a_ref,
                 b_ref,
@@ -732,7 +752,7 @@ def search_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
             b,
             env,
             "searchHandleAsync",
-            data_ptr.bitcast[NoneType](),
+            data_ptr.bitcast[NoneType]().as_unsafe_any_origin(),
             fn_ptr(exec_ref),
             fn_ptr(comp_ref),
         )
@@ -741,7 +761,7 @@ def search_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return aw.value
     except:
         throw_js_error(env, "searchHandleAsync failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- releaseMatrixGpu --------------------------------------------------------
@@ -757,7 +777,7 @@ def release_matrix_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, 0.0).value
     except:
         throw_js_error(env, "releaseMatrixGpu failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- Registration -----------------------------------------------------------

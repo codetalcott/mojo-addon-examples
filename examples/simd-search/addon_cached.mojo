@@ -14,7 +14,7 @@
 ## Build: pixi run bash simd-search/build_cached.sh
 
 from std.math import ceildiv
-from std.memory import alloc, memcpy, stack_allocation
+from std.memory import alloc, unsafe_memcpy, stack_allocation
 from std.gpu import thread_idx, block_idx, barrier
 from std.gpu.memory import AddressSpace
 from std.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
@@ -166,7 +166,7 @@ def _load_gpu(
     var dev_data = ctx.enqueue_create_buffer[DType.uint8](size)
 
     var staging = ctx.enqueue_create_host_buffer[DType.uint8](size)
-    memcpy(dest=staging.unsafe_ptr(), src=host_data, count=size)
+    unsafe_memcpy(dest=staging.unsafe_ptr(), src=host_data, count=size)
     ctx.enqueue_copy(dev_data, staging)
 
     var dev_partial = ctx.enqueue_create_buffer[DType.uint32](num_blocks)
@@ -191,7 +191,7 @@ def load_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsExternal.create_typed(b, env, cb_val^).value
     except:
         throw_js_error(env, "loadGpu failed (no GPU or upload error)")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- countByteHandle: query cached buffer -----------------------------------
@@ -201,7 +201,7 @@ def _count_byte_cached(
     cb: UnsafePointer[CachedBuffer, MutAnyOrigin],
     target: Byte,
 ) raises -> Int:
-    ctx.enqueue_function[_gpu_kernel_count_byte, _gpu_kernel_count_byte](
+    ctx.enqueue_function[_gpu_kernel_count_byte](
         cb[].data.unsafe_ptr(),
         cb[].partial.unsafe_ptr(),
         UInt32(target),
@@ -234,7 +234,7 @@ def count_byte_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, Float64(count)).value
     except:
         throw_js_error(env, "countByteHandle failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- releaseGpu: tombstone a handle (actual free is GC-driven) --------------
@@ -250,13 +250,13 @@ def release_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, 0.0).value
     except:
         throw_js_error(env, "releaseGpu failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- Module entry point -----------------------------------------------------
 
-@export("napi_register_module_v1", ABI="C")
-def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+@export("napi_register_module_v1")
+def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     try:
         init_async_runtime()
     except:
@@ -266,15 +266,15 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
-        bindings_ptr.init_pointee_move(bindings^)
+        bindings_ptr.unsafe_write(bindings^)
     except:
         bindings_ptr.free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]()
+    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
 
     try:
         var ctx = DeviceContext()
-        set_instance_data(bindings_ptr, env, GpuState(ctx^))
+        set_instance_data(bindings_ptr.as_unsafe_any_origin(), env, GpuState(ctx^))
     except:
         pass
 

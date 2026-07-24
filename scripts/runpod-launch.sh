@@ -32,6 +32,11 @@
 #   --cloud-type TYPE         SECURE | COMMUNITY   Default: SECURE
 #                             Secure gets direct public IP; Community uses proxy.
 #   --volume-id ID            Network volume to attach (or RUNPOD_VOLUME_ID env)
+#   --no-volume               Run with no network volume: bigger container disk and a
+#                             cold bootstrap (pixi + node + clone) instead of the seeded
+#                             /workspace/persist. Slower to start and nothing is cached
+#                             between runs, but needs no volume to exist. Only works for
+#                             a public repo and workloads that need no cached weights.
 #   --image NAME              Container image. Default: runpod/pytorch:1.0.3-cu1290-torch291-ubuntu2204
 #                             (CUDA 12.9, PyTorch 2.9.1, Ubuntu 22.04 for MAX compat).
 #                             Any NVIDIA CUDA image that boots sshd via PUBLIC_KEY works.
@@ -77,6 +82,11 @@ fi
 : "${RUNPOD_API_KEY:?RUNPOD_API_KEY not set}"
 
 VOLUME_ID="${RUNPOD_VOLUME_ID:-}"
+NO_VOLUME=0
+# Volume runs keep pixi + weights on /workspace, so 20 GB of container disk is
+# plenty. A --no-volume run installs the whole MAX toolchain onto container
+# disk instead, which does not fit in 20 GB.
+CONTAINER_DISK=20
 
 API="https://api.runpod.io/graphql"
 
@@ -89,6 +99,7 @@ while [ $# -gt 0 ]; do
     --gpu-type)      GPU_TYPE="$2";     shift 2 ;;
     --cloud-type)    CLOUD_TYPE="$2";   shift 2 ;;
     --volume-id)     VOLUME_ID="$2";    shift 2 ;;
+    --no-volume)     NO_VOLUME=1;       shift   ;;
     --image)         IMAGE="$2";        shift 2 ;;
     --ssh-key-path)  SSH_KEY_PATH="$2"; shift 2 ;;
     --capture-to)    CAPTURE="$2";      shift 2 ;;
@@ -102,11 +113,16 @@ while [ $# -gt 0 ]; do
 done
 
 [ -z "$COMMAND" ] && { echo "error: no command given (use -- 'your command')" >&2; usage >&2; exit 1; }
-[ -z "$VOLUME_ID" ] && { echo "error: --volume-id or RUNPOD_VOLUME_ID required" >&2; exit 1; }
+if [ "$NO_VOLUME" -eq 0 ] && [ -z "$VOLUME_ID" ]; then
+  echo "error: --volume-id or RUNPOD_VOLUME_ID required (or pass --no-volume)" >&2
+  exit 1
+fi
 
 if [ ! -f "$SSH_KEY_PATH" ] && [ -f "$HOME/.ssh/id_rsa.pub" ]; then
   SSH_KEY_PATH="$HOME/.ssh/id_rsa.pub"
 fi
+[ "$NO_VOLUME" -eq 1 ] && CONTAINER_DISK=80
+
 [ ! -f "$SSH_KEY_PATH" ] && { echo "error: no SSH public key at $SSH_KEY_PATH" >&2; exit 1; }
 PUBLIC_KEY=$(cat "$SSH_KEY_PATH")
 
@@ -157,27 +173,30 @@ LAUNCH_VARS=$(jq -nc \
   --arg image "$IMAGE" \
   --arg gpu "$GPU_TYPE" \
   --arg cloud "$CLOUD_TYPE" \
-  --arg vol "$VOLUME_ID" \
-  --arg mount "$VOLUME_MOUNT" \
+  --argjson disk "$CONTAINER_DISK" \
   --arg pubkey "$PUBLIC_KEY" \
   --arg term "$TERMINATE_AFTER" \
+  --arg vol "$VOLUME_ID" \
+  --arg mount "$VOLUME_MOUNT" \
+  --argjson novol "$NO_VOLUME" \
   '{
-    input: {
+    input: ({
       name: $name,
       imageName: $image,
       gpuTypeId: $gpu,
       cloudType: $cloud,
       gpuCount: 1,
-      containerDiskInGb: 20,
+      containerDiskInGb: $disk,
       volumeInGb: 0,
-      networkVolumeId: $vol,
-      volumeMountPath: $mount,
       ports: "22/tcp",
       startSsh: true,
       supportPublicIp: true,
       terminateAfter: $term,
       env: [{ key: "PUBLIC_KEY", value: $pubkey }]
-    }
+    } + (if $novol == 1 then {} else {
+      networkVolumeId: $vol,
+      volumeMountPath: $mount
+    } end))
   }')
 
 if [ "$DRY_RUN" = "1" ]; then
@@ -206,7 +225,11 @@ trap cleanup EXIT INT TERM
 
 # --- launch + wait ---------------------------------------------------------
 
-echo "[runpod] launching $GPU_TYPE ($CLOUD_TYPE, volume=$VOLUME_ID)"
+if [ "$NO_VOLUME" -eq 1 ]; then
+  echo "[runpod] launching $GPU_TYPE ($CLOUD_TYPE, no volume, ${CONTAINER_DISK}GB disk)"
+else
+  echo "[runpod] launching $GPU_TYPE ($CLOUD_TYPE, volume=$VOLUME_ID)"
+fi
 RESP=$(gql "$LAUNCH_MUTATION" "$LAUNCH_VARS")
 POD_ID=$(echo "$RESP" | jq -r '.data.podFindAndDeployOnDemand.id // empty')
 if [ -z "$POD_ID" ]; then
@@ -251,18 +274,46 @@ done
 
 # --- run command -----------------------------------------------------------
 
-REMOTE_SCRIPT=$(cat <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
+if [ "$NO_VOLUME" -eq 1 ]; then
+# Cold bootstrap: no seeded /workspace/persist to source, so install the
+# toolchain onto container disk and clone fresh. Commands mirror section 3 of
+# docs/cloud-benchmark-runbook.md. Only valid for a public repo — there are no
+# volume-provided credentials here.
+PREAMBLE=$(cat <<'EOF'
+export DEBIAN_FRONTEND=noninteractive
+curl -fsSL https://pixi.sh/install.sh | bash > /tmp/pixi-install.log 2>&1
+export PATH="$HOME/.pixi/bin:$PATH"
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash > /tmp/nvm-install.log 2>&1
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm install 22 > /tmp/nvm-node.log 2>&1
+nvm use 22 > /dev/null
+echo "node $(node --version)  pixi $(pixi --version 2>/dev/null || echo missing)"
+cd /workspace 2>/dev/null || cd "$HOME"
+if [ ! -d mojo-addon-examples ]; then
+  git clone --quiet https://github.com/codetalcott/mojo-addon-examples.git
+fi
+cd mojo-addon-examples
+EOF
+)
+else
+PREAMBLE=$(cat <<EOF
 # Soft-source bootstrap: set up PATH + auth, but don't fail the whole run if
 # the volume's bootstrap has stale logic (e.g., git-reset pattern). The
 # caller's command is expected to do its own repo sync regardless.
 source "$BOOTSTRAP" 2>&1 || echo "[warn] bootstrap exited non-zero; continuing"
-# Re-export what bootstrap should have set in case it failed before the exports.
 export PATH="/workspace/persist/bin:/workspace/persist/pixi-home/bin:\$PATH"
 export PIXI_CACHE_DIR=/workspace/persist/pixi-cache
 export HF_HOME=/workspace/persist/model-cache
 cd /workspace/mojo-addon-examples 2>/dev/null || true
+EOF
+)
+fi
+
+REMOTE_SCRIPT=$(cat <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+$PREAMBLE
 echo "=== host \$(hostname) === \$(date -u) ==="
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || true
 echo "=== command: $COMMAND ==="

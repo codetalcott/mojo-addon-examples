@@ -17,10 +17,10 @@
 ## Build: pixi run bash matmul/build_cached.sh
 
 from std.math import ceildiv
-from std.memory import alloc, memcpy
+from std.memory import alloc, unsafe_memcpy
 from std.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
 
-from layout import Coord, Idx, TileTensor, row_major
+from layout import Coord, TileTensor, row_major
 from linalg.matmul import matmul as linalg_matmul
 
 from napi.types import NapiEnv, NapiValue
@@ -100,7 +100,7 @@ def _load_matrix_gpu(
 
     var dev_data = ctx.enqueue_create_buffer[dtype](num_elems)
     var staging = ctx.enqueue_create_host_buffer[dtype](num_elems)
-    memcpy(
+    unsafe_memcpy(
         dest=staging.unsafe_ptr().bitcast[Byte](),
         src=src_bytes,
         count=num_bytes,
@@ -125,7 +125,7 @@ def load_matrix_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsExternal.create_typed(b, env, cm_val^).value
     except:
         throw_js_error(env, "loadMatrixGpu failed (no GPU or upload error)")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- matmulHandle: C = A × B using linalg.matmul ----------------------------
@@ -150,16 +150,16 @@ def _matmul_cached(
     var host_c = ctx.enqueue_create_host_buffer[dtype](c_elems)
 
     # Wrap persistent A, B and per-call C as TileTensors.
-    var tt_a = TileTensor[dtype](a[].dev_data, row_major(Coord(Idx(M), Idx(K))))
-    var tt_b = TileTensor[dtype](b[].dev_data, row_major(Coord(Idx(K), Idx(N))))
-    var tt_c = TileTensor[dtype](dev_c, row_major(Coord(Idx(M), Idx(N))))
+    var tt_a = TileTensor[dtype](a[].dev_data, row_major(Coord(M, K)))
+    var tt_b = TileTensor[dtype](b[].dev_data, row_major(Coord(K, N)))
+    var tt_c = TileTensor[dtype](dev_c, row_major(Coord(M, N)))
 
     linalg_matmul[target="gpu"](tt_c, tt_a, tt_b, Optional(ctx))
 
     ctx.enqueue_copy(host_c, dev_c)
     ctx.synchronize()
 
-    memcpy(
+    unsafe_memcpy(
         dest=dst_bytes,
         src=host_c.unsafe_ptr().bitcast[Byte](),
         count=c_elems * 4,
@@ -200,7 +200,7 @@ def matmul_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, 0.0).value
     except:
         throw_js_error(env, "matmulHandle failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- searchHandle: fused matmul + per-row top-k -----------------------------
@@ -307,16 +307,16 @@ def _search_cached(
     var dev_c = ctx.enqueue_create_buffer[dtype](c_elems)
     var host_c = ctx.enqueue_create_host_buffer[dtype](c_elems)
 
-    var tt_a = TileTensor[dtype](a[].dev_data, row_major(Coord(Idx(M), Idx(K))))
-    var tt_b = TileTensor[dtype](b[].dev_data, row_major(Coord(Idx(K), Idx(N))))
-    var tt_c = TileTensor[dtype](dev_c, row_major(Coord(Idx(M), Idx(N))))
+    var tt_a = TileTensor[dtype](a[].dev_data, row_major(Coord(M, K)))
+    var tt_b = TileTensor[dtype](b[].dev_data, row_major(Coord(K, N)))
+    var tt_c = TileTensor[dtype](dev_c, row_major(Coord(M, N)))
 
     linalg_matmul[target="gpu"](tt_c, tt_a, tt_b, Optional(ctx))
 
     ctx.enqueue_copy(host_c, dev_c)
     ctx.synchronize()
 
-    var host_ptr = host_c.unsafe_ptr()
+    var host_ptr = host_c.unsafe_ptr().as_unsafe_any_origin()
     for row in range(M):
         _topk_row(
             host_ptr + row * N,
@@ -369,7 +369,7 @@ def search_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, 0.0).value
     except:
         throw_js_error(env, "searchHandle failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- releaseMatrixGpu --------------------------------------------------------
@@ -385,13 +385,13 @@ def release_matrix_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, 0.0).value
     except:
         throw_js_error(env, "releaseMatrixGpu failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- Module entry point ------------------------------------------------------
 
-@export("napi_register_module_v1", ABI="C")
-def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+@export("napi_register_module_v1")
+def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     try:
         init_async_runtime()
     except:
@@ -401,15 +401,15 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
-        bindings_ptr.init_pointee_move(bindings^)
+        bindings_ptr.unsafe_write(bindings^)
     except:
         bindings_ptr.free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]()
+    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
 
     try:
         var ctx = DeviceContext()
-        set_instance_data(bindings_ptr, env, GpuState(ctx^))
+        set_instance_data(bindings_ptr.as_unsafe_any_origin(), env, GpuState(ctx^))
     except:
         pass
 

@@ -147,7 +147,7 @@ def wy_hash_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsBigInt.from_uint64(bindings, env, result).value
     except:
         throw_js_error(env, "wyHash failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 def wy_hash64_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -166,22 +166,22 @@ def wy_hash64_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(bindings, env, Float64(result)).value
     except:
         throw_js_error(env, "wyHash64 failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- Module entry point -------------------------------------------------------
 
-@export("napi_register_module_v1", ABI="C")
-def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+@export("napi_register_module_v1")
+def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     var bindings_ptr = alloc[NapiBindings](1)
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
-        bindings_ptr.init_pointee_move(bindings^)
+        bindings_ptr.unsafe_write(bindings^)
     except:
         bindings_ptr.free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]()
+    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
 
     var wh_ref = wy_hash_fn
     var wh64_ref = wy_hash64_fn

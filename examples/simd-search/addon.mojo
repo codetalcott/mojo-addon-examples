@@ -8,10 +8,10 @@
 ## Build:  pixi run bash simd-search/build.sh
 ## Run:    node simd-search/search.js
 
-from std.algorithm.functional import vectorize, parallelize
+from std.algorithm.functional import vectorize
 from std.sys import simd_width_of
 from std.math import ceildiv
-from std.memory import alloc, memcpy, stack_allocation
+from std.memory import alloc, unsafe_memcpy, stack_allocation
 from std.gpu import thread_idx, block_idx, barrier
 from std.gpu.memory import AddressSpace
 from std.gpu.host import DeviceContext
@@ -27,7 +27,7 @@ from napi.framework.js_typedarray import JsTypedArray
 from napi.framework.js_arraybuffer import JsArrayBuffer
 from napi.framework.args import CbArgs
 from napi.framework.register import fn_ptr, ModuleBuilder
-from napi.framework.runtime import init_async_runtime
+from napi.framework.runtime import init_async_runtime, parallelize_safe
 
 
 # --- GPU tuning + state cache ------------------------------------------------
@@ -50,15 +50,15 @@ def _gpu_state_finalize(
     hint: OpaquePointer[MutAnyOrigin],
 ):
     var ptr = data.bitcast[GpuState]()
-    ptr.destroy_pointee()
+    ptr.unsafe_deinit_pointee()
     ptr.free()
 
 
 def _get_gpu_state(
     b: Bindings, env: NapiEnv
 ) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
-    var data = OpaquePointer[MutAnyOrigin]()
-    _ = raw_get_instance_data(b, env, UnsafePointer(to=data).bitcast[NoneType]())
+    var data = OpaquePointer[MutAnyOrigin](unsafe_from_address=Int(0))
+    _ = raw_get_instance_data(b, env, UnsafePointer(to=data).bitcast[NoneType]().as_unsafe_any_origin())
     if Int(data) == 0:
         raise Error("countByteGpu requires a GPU (no accelerator found)")
     return data.bitcast[GpuState]()
@@ -114,7 +114,7 @@ def _count_byte_range(
 ) -> Int:
     var count: Int = 0
     var base = start
-    def compute[width: Int](offset: Int) unified {mut count, read data, read base, read target}:
+    def compute[width: Int](offset: Int) {mut count, imm data, imm base, imm target}:
         var chunk = data.load[width=width](base + offset)
         count += _simd_count_matches(chunk, target)
     vectorize[simd_width_of[DType.uint8]()](end - start, compute)
@@ -128,13 +128,18 @@ def _count_byte(
 ) -> Int:
     if size < PARALLEL_THRESHOLD:
         return _count_byte_range(data, target, 0, size)
-    var chunk_size = size // NUM_WORKERS
     var partials = alloc[Int](NUM_WORKERS)
     def worker(wid: Int) capturing:
+        # NOTE: derived inside the worker, not captured. Capturing a post-computed
+        # scalar local in a parallelize closure miscompiles on Linux x86_64
+        # (dev2026072306): the capture slot reads garbage on the AsyncRT thread.
+        # The compiler flags the bad pattern with "assignment to 'X' was never
+        # used" at the capture site. See commit message for the full forensics.
+        var chunk_size = size // NUM_WORKERS
         var s = wid * chunk_size
         var e = s + chunk_size if wid < NUM_WORKERS - 1 else size
         partials[wid] = _count_byte_range(data, target, s, e)
-    parallelize[worker](NUM_WORKERS)
+    parallelize_safe[worker](NUM_WORKERS)
     var total: Int = 0
     for i in range(NUM_WORKERS):
         total += partials[i]
@@ -192,12 +197,12 @@ def _count_byte_gpu(
 
     var dev_data = ctx.enqueue_create_buffer[DType.uint8](size)
     var host_data = ctx.enqueue_create_host_buffer[DType.uint8](size)
-    memcpy(dest=host_data.unsafe_ptr(), src=data, count=size)
+    unsafe_memcpy(dest=host_data.unsafe_ptr(), src=data, count=size)
     ctx.enqueue_copy(dev_data, host_data)
 
     var dev_partial = ctx.enqueue_create_buffer[DType.uint32](num_blocks)
 
-    ctx.enqueue_function[_gpu_kernel_count_byte, _gpu_kernel_count_byte](
+    ctx.enqueue_function[_gpu_kernel_count_byte](
         dev_data.unsafe_ptr(),
         dev_partial.unsafe_ptr(),
         UInt32(target),
@@ -358,7 +363,7 @@ def count_byte_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, Float64(count)).value
     except:
         throw_js_error(env, "countByte failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 def count_byte_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -373,7 +378,7 @@ def count_byte_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, Float64(count)).value
     except:
         throw_js_error(env, "countByteGpu failed (no GPU or kernel error)")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 def count_lines_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -386,7 +391,7 @@ def count_lines_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, Float64(count)).value
     except:
         throw_js_error(env, "countLines failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 def search_all_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -418,13 +423,13 @@ def search_all_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsTypedArray.create_uint32(b, env, ab.value, 0, UInt(match_count)).value
     except:
         throw_js_error(env, "searchAll failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- Module entry point -------------------------------------------------------
 
-@export("napi_register_module_v1", ABI="C")
-def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+@export("napi_register_module_v1")
+def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     try:
         init_async_runtime()
     except:
@@ -434,27 +439,27 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
-        bindings_ptr.init_pointee_move(bindings^)
+        bindings_ptr.unsafe_write(bindings^)
     except:
         bindings_ptr.free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]()
+    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
 
     # Cache a DeviceContext if a GPU is available.
     try:
         var ctx = DeviceContext()
         var state_ptr = alloc[GpuState](1)
-        state_ptr.init_pointee_move(GpuState(ctx^))
+        state_ptr.unsafe_write(GpuState(ctx^))
         var fin_ref = _gpu_state_finalize
         var fin_ptr = UnsafePointer(to=fin_ref).bitcast[
             OpaquePointer[MutAnyOrigin]
         ]()[]
         _ = raw_set_instance_data(
-            bindings_ptr,
+            bindings_ptr.as_unsafe_any_origin(),
             env,
-            state_ptr.bitcast[NoneType](),
+            state_ptr.bitcast[NoneType]().as_unsafe_any_origin(),
             fin_ptr,
-            OpaquePointer[MutAnyOrigin](),
+            OpaquePointer[MutAnyOrigin](unsafe_from_address=Int(0)),
         )
     except:
         pass

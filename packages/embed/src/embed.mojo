@@ -48,7 +48,7 @@ def embed_tokens_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var b = CbArgs.get_bindings(env, info)
         # napi-mojo's CbArgs tops out at get_four; use get_argv for 5 args.
         var argv = alloc[NapiValue](5)
-        CbArgs.get_argv(b, env, info, 5, argv)
+        CbArgs.get_argv(b, env, info, 5, argv.as_unsafe_any_origin())
 
         # argv[0]: Int32Array of token IDs, shape [batch, seqLen]
         # argv[1]: Int32Array of attention mask, shape [batch, seqLen]
@@ -95,7 +95,7 @@ def embed_tokens_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         # throw_js_error takes a StringLiteral only; the Python exception
         # details go to stderr. Inspect the capture file for what failed.
         throw_js_error(env, "embedTokens failed (see pod stderr)")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- embedTokensAsync: non-blocking variant ---------------------------------
@@ -118,10 +118,15 @@ def embed_tokens_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 struct EmbedAsyncData(Movable):
     # JsRef is not Movable in napi-mojo 0.3.0, so we store raw NapiRef handles
     # (trivially copyable OpaquePointer) and wrap JsRef() at the delete site.
+    @__allow_legacy_any_origin_fields
     var deferred: NapiDeferred
+    @__allow_legacy_any_origin_fields
     var work: NapiAsyncWork
+    @__allow_legacy_any_origin_fields
     var ids_ref: NapiRef
+    @__allow_legacy_any_origin_fields
     var mask_ref: NapiRef
+    @__allow_legacy_any_origin_fields
     var dst_ref: NapiRef
     var ids_addr: Int
     var mask_addr: Int
@@ -141,8 +146,8 @@ struct EmbedAsyncData(Movable):
         batch: Int,
         seq_len: Int,
     ):
-        self.deferred = NapiDeferred()
-        self.work = NapiAsyncWork()
+        self.deferred = NapiDeferred(unsafe_from_address=Int(0))
+        self.work = NapiAsyncWork(unsafe_from_address=Int(0))
         self.ids_ref = ids_ref
         self.mask_ref = mask_ref
         self.dst_ref = dst_ref
@@ -214,7 +219,7 @@ def embed_async_complete(
             )
     except:
         pass
-    ptr.destroy_pointee()
+    ptr.unsafe_deinit_pointee()
     ptr.free()
 
 
@@ -222,7 +227,7 @@ def embed_tokens_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var b = CbArgs.get_bindings(env, info)
         var argv = alloc[NapiValue](5)
-        CbArgs.get_argv(b, env, info, 5, argv)
+        CbArgs.get_argv(b, env, info, 5, argv.as_unsafe_any_origin())
 
         var ids_ta = JsTypedArray(argv[0])
         var mask_ta = JsTypedArray(argv[1])
@@ -255,7 +260,7 @@ def embed_tokens_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         argv.free()
 
         var data_ptr = alloc[EmbedAsyncData](1)
-        data_ptr.init_pointee_move(
+        data_ptr.unsafe_write(
             EmbedAsyncData(
                 ids_ref,
                 mask_ref,
@@ -274,7 +279,7 @@ def embed_tokens_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
             b,
             env,
             "embedTokensAsync",
-            data_ptr.bitcast[NoneType](),
+            data_ptr.bitcast[NoneType]().as_unsafe_any_origin(),
             fn_ptr(exec_ref),
             fn_ptr(comp_ref),
         )
@@ -283,7 +288,7 @@ def embed_tokens_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return aw.value
     except:
         throw_js_error(env, "embedTokensAsync failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 def register_embed(mut m: ModuleBuilder, b: Bindings) raises:

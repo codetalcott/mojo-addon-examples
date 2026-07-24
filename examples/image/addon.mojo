@@ -9,10 +9,10 @@
 ## Build:  pixi run bash image/build.sh
 ## Run:    node image/image.js
 
-from std.algorithm.functional import parallelize, vectorize
+from std.algorithm.functional import vectorize
 from std.sys import simd_width_of
 from std.math import ceildiv
-from std.memory import alloc, memcpy
+from std.memory import alloc, unsafe_memcpy
 from std.gpu import global_idx
 from std.gpu.host import DeviceContext
 
@@ -26,7 +26,7 @@ from napi.framework.js_typedarray import JsTypedArray
 from napi.framework.js_arraybuffer import JsArrayBuffer
 from napi.framework.args import CbArgs
 from napi.framework.register import fn_ptr, ModuleBuilder
-from napi.framework.runtime import init_async_runtime
+from napi.framework.runtime import init_async_runtime, parallelize_safe
 
 
 comptime NUM_WORKERS = 4
@@ -52,15 +52,15 @@ def _gpu_state_finalize(
     hint: OpaquePointer[MutAnyOrigin],
 ):
     var ptr = data.bitcast[GpuState]()
-    ptr.destroy_pointee()
+    ptr.unsafe_deinit_pointee()
     ptr.free()
 
 
 def _get_gpu_state(
     b: Bindings, env: NapiEnv
 ) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
-    var data = OpaquePointer[MutAnyOrigin]()
-    _ = raw_get_instance_data(b, env, UnsafePointer(to=data).bitcast[NoneType]())
+    var data = OpaquePointer[MutAnyOrigin](unsafe_from_address=Int(0))
+    _ = raw_get_instance_data(b, env, UnsafePointer(to=data).bitcast[NoneType]().as_unsafe_any_origin())
     if Int(data) == 0:
         raise Error("grayscaleGpu requires a GPU (no accelerator found)")
     return data.bitcast[GpuState]()
@@ -79,7 +79,7 @@ def _grayscale_rows(
     var dst32 = dst.bitcast[UInt32]()
     var base = start_row * width
     var num_pixels = (end_row - start_row) * width
-    def compute[w: Int](offset: Int) unified {read}:
+    def compute[w: Int](offset: Int) {imm src32, imm dst32, imm base}:
         var pixels = src32.load[width=w](base + offset)
         var r = pixels & SIMD[DType.uint32, w](0xFF)
         var g = (pixels >> 8) & SIMD[DType.uint32, w](0xFF)
@@ -95,12 +95,17 @@ def _grayscale_parallel(
     dst: UnsafePointer[Byte, MutAnyOrigin],
     width: Int, height: Int,
 ):
-    var rows_per = height // NUM_WORKERS
     def worker(wid: Int) capturing:
+        # NOTE: derived inside the worker, not captured. Capturing a post-computed
+        # scalar local in a parallelize closure miscompiles on Linux x86_64
+        # (dev2026072306): the capture slot reads garbage on the AsyncRT thread.
+        # The compiler flags the bad pattern with "assignment to 'X' was never
+        # used" at the capture site. See commit message for the full forensics.
+        var rows_per = height // NUM_WORKERS
         var s = wid * rows_per
         var e = s + rows_per if wid < NUM_WORKERS - 1 else height
         _grayscale_rows(src, dst, s, e, width)
-    parallelize[worker](NUM_WORKERS)
+    parallelize_safe[worker](NUM_WORKERS)
 
 
 # --- Grayscale GPU kernel -----------------------------------------------------
@@ -137,7 +142,7 @@ def _grayscale_gpu(
     var dev_dst = ctx.enqueue_create_buffer[DType.uint32](num_pixels)
     var host_src = ctx.enqueue_create_host_buffer[DType.uint32](num_pixels)
 
-    memcpy(
+    unsafe_memcpy(
         dest=host_src.unsafe_ptr().bitcast[Byte](),
         src=src,
         count=num_bytes,
@@ -145,7 +150,7 @@ def _grayscale_gpu(
     ctx.enqueue_copy(dev_src, host_src)
 
     var grid = ceildiv(num_pixels, GPU_BLOCK)
-    ctx.enqueue_function[_gpu_kernel_grayscale, _gpu_kernel_grayscale](
+    ctx.enqueue_function[_gpu_kernel_grayscale](
         dev_src.unsafe_ptr(),
         dev_dst.unsafe_ptr(),
         num_pixels,
@@ -157,7 +162,7 @@ def _grayscale_gpu(
     ctx.enqueue_copy(host_dst, dev_dst)
     ctx.synchronize()
 
-    memcpy(
+    unsafe_memcpy(
         dest=dst,
         src=host_dst.unsafe_ptr().bitcast[Byte](),
         count=num_bytes,
@@ -178,7 +183,7 @@ def _brightness_rows(
     var dst32 = dst.bitcast[UInt32]()
     var base = start_row * width
     var num_pixels = (end_row - start_row) * width
-    def compute[w: Int](offset: Int) unified {read}:
+    def compute[w: Int](offset: Int) {imm src32, imm dst32, imm base, imm factor_fp}:
         var pixels = src32.load[width=w](base + offset)
         var r = pixels & SIMD[DType.uint32, w](0xFF)
         var g = (pixels >> 8) & SIMD[DType.uint32, w](0xFF)
@@ -197,12 +202,17 @@ def _brightness_parallel(
     dst: UnsafePointer[Byte, MutAnyOrigin],
     width: Int, height: Int, factor_fp: UInt32,
 ):
-    var rows_per = height // NUM_WORKERS
     def worker(wid: Int) capturing:
+        # NOTE: derived inside the worker, not captured. Capturing a post-computed
+        # scalar local in a parallelize closure miscompiles on Linux x86_64
+        # (dev2026072306): the capture slot reads garbage on the AsyncRT thread.
+        # The compiler flags the bad pattern with "assignment to 'X' was never
+        # used" at the capture site. See commit message for the full forensics.
+        var rows_per = height // NUM_WORKERS
         var s = wid * rows_per
         var e = s + rows_per if wid < NUM_WORKERS - 1 else height
         _brightness_rows(src, dst, s, e, width, factor_fp)
-    parallelize[worker](NUM_WORKERS)
+    parallelize_safe[worker](NUM_WORKERS)
 
 
 # --- Threshold kernel ---------------------------------------------------------
@@ -218,7 +228,7 @@ def _threshold_rows(
     var dst32 = dst.bitcast[UInt32]()
     var base = start_row * width
     var num_pixels = (end_row - start_row) * width
-    def compute[w: Int](offset: Int) unified {read}:
+    def compute[w: Int](offset: Int) {imm src32, imm dst32, imm base, imm thresh}:
         var pixels = src32.load[width=w](base + offset)
         var r = pixels & SIMD[DType.uint32, w](0xFF)
         var g = (pixels >> 8) & SIMD[DType.uint32, w](0xFF)
@@ -238,12 +248,17 @@ def _threshold_parallel(
     dst: UnsafePointer[Byte, MutAnyOrigin],
     width: Int, height: Int, thresh: Byte,
 ):
-    var rows_per = height // NUM_WORKERS
     def worker(wid: Int) capturing:
+        # NOTE: derived inside the worker, not captured. Capturing a post-computed
+        # scalar local in a parallelize closure miscompiles on Linux x86_64
+        # (dev2026072306): the capture slot reads garbage on the AsyncRT thread.
+        # The compiler flags the bad pattern with "assignment to 'X' was never
+        # used" at the capture site. See commit message for the full forensics.
+        var rows_per = height // NUM_WORKERS
         var s = wid * rows_per
         var e = s + rows_per if wid < NUM_WORKERS - 1 else height
         _threshold_rows(src, dst, s, e, width, thresh)
-    parallelize[worker](NUM_WORKERS)
+    parallelize_safe[worker](NUM_WORKERS)
 
 
 # --- Blur kernel --------------------------------------------------------------
@@ -327,7 +342,7 @@ def _blur_parallel(
     width: Int, height: Int, radius: Int,
 ):
     # Temp buffer for intermediate result between passes
-    var temp = alloc[Byte](width * height * 4)
+    var temp = alloc[Byte](width * height * 4).as_unsafe_any_origin()
 
     # Horizontal pass: src → temp, parallelize across rows
     var rows_per = height // NUM_WORKERS
@@ -335,7 +350,7 @@ def _blur_parallel(
         var s = wid * rows_per
         var e = s + rows_per if wid < NUM_WORKERS - 1 else height
         _blur_horizontal_rows(src, temp, s, e, width, radius)
-    parallelize[h_worker](NUM_WORKERS)
+    parallelize_safe[h_worker](NUM_WORKERS)
 
     # Vertical pass: temp → dst, parallelize across columns
     var cols_per = width // NUM_WORKERS
@@ -343,7 +358,7 @@ def _blur_parallel(
         var s = wid * cols_per
         var e = s + cols_per if wid < NUM_WORKERS - 1 else width
         _blur_vertical_cols(temp, dst, s, e, width, height, radius)
-    parallelize[v_worker](NUM_WORKERS)
+    parallelize_safe[v_worker](NUM_WORKERS)
 
     temp.free()
 
@@ -366,7 +381,7 @@ def grayscale_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return result_ta.value
     except:
         throw_js_error(env, "grayscale failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 def grayscale_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -386,7 +401,7 @@ def grayscale_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return result_ta.value
     except:
         throw_js_error(env, "grayscaleGpu failed (no GPU or kernel error)")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 def brightness_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -407,7 +422,7 @@ def brightness_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return result_ta.value
     except:
         throw_js_error(env, "brightness failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 def threshold_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -427,7 +442,7 @@ def threshold_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return result_ta.value
     except:
         throw_js_error(env, "threshold failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 def blur_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -447,13 +462,13 @@ def blur_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return result_ta.value
     except:
         throw_js_error(env, "blur failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- Module entry point -------------------------------------------------------
 
-@export("napi_register_module_v1", ABI="C")
-def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+@export("napi_register_module_v1")
+def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     try:
         init_async_runtime()
     except:
@@ -463,27 +478,27 @@ def register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
-        bindings_ptr.init_pointee_move(bindings^)
+        bindings_ptr.unsafe_write(bindings^)
     except:
         bindings_ptr.free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]()
+    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
 
     # Cache a DeviceContext if a GPU is available. Skip silently if not.
     try:
         var ctx = DeviceContext()
         var state_ptr = alloc[GpuState](1)
-        state_ptr.init_pointee_move(GpuState(ctx^))
+        state_ptr.unsafe_write(GpuState(ctx^))
         var fin_ref = _gpu_state_finalize
         var fin_ptr = UnsafePointer(to=fin_ref).bitcast[
             OpaquePointer[MutAnyOrigin]
         ]()[]
         _ = raw_set_instance_data(
-            bindings_ptr,
+            bindings_ptr.as_unsafe_any_origin(),
             env,
-            state_ptr.bitcast[NoneType](),
+            state_ptr.bitcast[NoneType]().as_unsafe_any_origin(),
             fin_ptr,
-            OpaquePointer[MutAnyOrigin](),
+            OpaquePointer[MutAnyOrigin](unsafe_from_address=Int(0)),
         )
     except:
         pass
