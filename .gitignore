@@ -35,3 +35,7 @@ docs/*-draft.md
 docs/modular-letter-draft-revised.md
 docs/modular-npm-runtime-proposal.md
 docs/plan-multilingual-semantic-search.html
+
+# Python bytecode from packages/embed
+__pycache__/
+*.pyc
