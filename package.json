@@ -22,7 +22,7 @@
     "@qkstat/embed": "file:packages/embed",
     "@qkstat/rag": "file:packages/rag",
     "hnswlib-node": "^3.0.0",
-    "napi-mojo": "^0.5.1",
+    "napi-mojo": "^0.6.0",
     "onnxruntime-node": "^1.24.3"
   }
 }
