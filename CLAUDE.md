@@ -114,6 +114,7 @@ The repo root's `pixi.toml` includes `transformers`, `safetensors`, etc. specifi
 ## Notable constraints
 
 - **Mojo version pin** lives in `pixi.toml` (`max = "==26.6.0.dev..."`). Upgrading is scripted by `scripts/update-mojo-version.sh`. The pin must track whatever nightly the installed napi-mojo was migrated to — the framework ships Mojo *source*, so a mismatch surfaces as compile errors inside `node_modules/napi-mojo/src`, not in this repo's code.
+- **GPU kernel parameters must be fixed-width** (Mojo 26.6+). `Int`/`UInt` no longer conform to `DevicePassable`, so a kernel launched via `ctx.enqueue_function[...]` cannot take an `Int` size argument — it fails with `constraint failed: Int and UInt do not conform to DevicePassable`. Every kernel here takes its length as `Int64` and converts back with `var n = Int(n_i64)` on the first line of the body, which keeps the indexing logic unchanged. The host side (`enqueue_create_buffer`, `ceildiv`, grid math) is unaffected and still uses `Int`.
 - **Apple Silicon GPU benchmarks** require Xcode's Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`). Without it, GPU builds on Darwin fail at link time.
 - **MAX on M4 is currently CPU-only for `packages/embed`** — `Accelerator()` init returns "Not implemented for device: Apple M4". All embed GPU iteration happens on RunPod.
 - **Node version**: `engines.node >=22.12` in `packages/rag`. Root examples also assume that.

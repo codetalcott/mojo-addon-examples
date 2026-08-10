@@ -105,8 +105,11 @@ def _gpu_kernel_count_byte(
     data: Pointer[Byte, MutAnyOrigin],
     partial: Pointer[UInt32, MutAnyOrigin],
     target: UInt32,
-    size: Int,
+    size_i64: Int64,
 ):
+    # Int/UInt are not DevicePassable as of Mojo 26.6 — kernel params must
+    # be fixed-width. Convert back to Int for indexing.
+    var size = Int(size_i64)
     var s_count = stack_allocation[
         GPU_BLOCK, Scalar[DType.uint32], address_space=AddressSpace.SHARED
     ]()
@@ -207,7 +210,7 @@ def _count_byte_cached(
         cb[].data.unsafe_ptr(),
         cb[].partial.unsafe_ptr(),
         UInt32(target),
-        cb[].size,
+        Int64(cb[].size),
         grid_dim=cb[].num_blocks,
         block_dim=GPU_BLOCK,
     )

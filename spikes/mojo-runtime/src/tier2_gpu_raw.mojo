@@ -19,8 +19,11 @@ comptime BLOCK = 256
 def _double_kernel(
     src: Pointer[Float32, MutAnyOrigin],
     dst: Pointer[Float32, MutAnyOrigin],
-    n: Int,
+    n_i64: Int64,
 ):
+    # Int/UInt are not DevicePassable as of Mojo 26.6 — kernel params must
+    # be fixed-width. Convert back to Int for indexing.
+    var n = Int(n_i64)
     var tid = Int(global_idx.x)
     if tid < n:
         dst[unsafe_offset=tid] = src[unsafe_offset=tid] * 2.0
@@ -41,7 +44,7 @@ def gpu_double(n: Int) abi("C") -> Float32:
         ctx.enqueue_function[_double_kernel, _double_kernel](
             dev_src.unsafe_ptr(),
             dev_dst.unsafe_ptr(),
-            n,
+            Int64(n),
             grid_dim=grid,
             block_dim=BLOCK,
         )

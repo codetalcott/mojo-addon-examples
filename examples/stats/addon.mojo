@@ -225,8 +225,11 @@ def _gpu_kernel_sum_min_max(
     partial_sum: Pointer[Float32, MutAnyOrigin],
     partial_min: Pointer[Float32, MutAnyOrigin],
     partial_max: Pointer[Float32, MutAnyOrigin],
-    size: Int,
+    size_i64: Int64,
 ):
+    # Int/UInt are not DevicePassable as of Mojo 26.6 — kernel params must
+    # be fixed-width. Convert back to Int for indexing.
+    var size = Int(size_i64)
     var s_sum = stack_allocation[
         GPU_BLOCK, Scalar[DType.float32], address_space=AddressSpace.SHARED
     ]()
@@ -293,8 +296,11 @@ def _gpu_kernel_sum_sq_diff(
     data: Pointer[Float32, MutAnyOrigin],
     partial: Pointer[Float32, MutAnyOrigin],
     mean: Float32,
-    size: Int,
+    size_i64: Int64,
 ):
+    # Int/UInt are not DevicePassable as of Mojo 26.6 — kernel params must
+    # be fixed-width. Convert back to Int for indexing.
+    var size = Int(size_i64)
     var s_sum = stack_allocation[
         GPU_BLOCK, Scalar[DType.float32], address_space=AddressSpace.SHARED
     ]()
@@ -349,7 +355,7 @@ def _gpu_sum_min_max(
         dev_psum.unsafe_ptr(),
         dev_pmin.unsafe_ptr(),
         dev_pmax.unsafe_ptr(),
-        size,
+        Int64(size),
         grid_dim=num_blocks,
         block_dim=GPU_BLOCK,
     )
@@ -407,7 +413,7 @@ def _gpu_sum_sq_diff(
         dev_data.unsafe_ptr(),
         dev_partial.unsafe_ptr(),
         Float32(mean),
-        size,
+        Int64(size),
         grid_dim=num_blocks,
         block_dim=GPU_BLOCK,
     )

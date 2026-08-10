@@ -18,8 +18,11 @@ comptime BLOCK = 256
 def _double_kernel[Layout: TensorLayout](
     src: TileTensor[DType.float32, Layout, MutAnyOrigin],
     dst: TileTensor[DType.float32, Layout, MutAnyOrigin],
-    n: Int,
+    n_i64: Int64,
 ):
+    # Int/UInt are not DevicePassable as of Mojo 26.6 — kernel params must
+    # be fixed-width. Convert back to Int for indexing.
+    var n = Int(n_i64)
     comptime assert src.flat_rank == 1, "expected 1D tensor"
     var tid = Int(global_idx.x)
     if tid < n:
@@ -46,7 +49,7 @@ def gpu_double(n: Int) abi("C") -> Float32:
         ctx.enqueue_function[kernel, kernel](
             t_src,
             t_dst,
-            n,
+            Int64(n),
             grid_dim=grid,
             block_dim=BLOCK,
         )

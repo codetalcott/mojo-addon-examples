@@ -116,8 +116,11 @@ def _grayscale_parallel(
 def _gpu_kernel_grayscale(
     src: Pointer[UInt32, MutAnyOrigin],
     dst: Pointer[UInt32, MutAnyOrigin],
-    num_pixels: Int,
+    num_pixels_i64: Int64,
 ):
+    # Int/UInt are not DevicePassable as of Mojo 26.6 — kernel params must
+    # be fixed-width. Convert back to Int for indexing.
+    var num_pixels = Int(num_pixels_i64)
     var tid = Int(global_idx.x)
     if tid >= num_pixels:
         return
@@ -154,7 +157,7 @@ def _grayscale_gpu(
     ctx.enqueue_function[_gpu_kernel_grayscale](
         dev_src.unsafe_ptr(),
         dev_dst.unsafe_ptr(),
-        num_pixels,
+        Int64(num_pixels),
         grid_dim=grid,
         block_dim=GPU_BLOCK,
     )

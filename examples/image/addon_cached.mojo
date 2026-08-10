@@ -97,8 +97,11 @@ struct CachedImage(Movable):
 def _gpu_kernel_grayscale(
     src: Pointer[UInt32, MutAnyOrigin],
     dst: Pointer[UInt32, MutAnyOrigin],
-    num_pixels: Int,
+    num_pixels_i64: Int64,
 ):
+    # Int/UInt are not DevicePassable as of Mojo 26.6 — kernel params must
+    # be fixed-width. Convert back to Int for indexing.
+    var num_pixels = Int(num_pixels_i64)
     var tid = Int(global_idx.x)
     if tid >= num_pixels:
         return
@@ -171,7 +174,7 @@ def _grayscale_cached(
     ctx.enqueue_function[_gpu_kernel_grayscale](
         ci[].src.unsafe_ptr(),
         ci[].dst.unsafe_ptr(),
-        ci[].num_pixels,
+        Int64(ci[].num_pixels),
         grid_dim=grid,
         block_dim=GPU_BLOCK,
     )
