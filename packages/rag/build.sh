@@ -1,19 +1,14 @@
 #!/usr/bin/env bash
 # Build script for @qkstat/rag
 # Compiles src/lib.mojo into build/rag.node, pulling napi-mojo's N-API framework
-# from the monorepo's node_modules/napi-mojo/src (must be installed).
+# from the monorepo's installed napi-mojo (see scripts/napi-include.sh).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-NAPI_SRC="$ROOT_DIR/node_modules/napi-mojo/src"
+source "$ROOT_DIR/scripts/napi-include.sh"
 
 mkdir -p "$SCRIPT_DIR/build"
-
-if [ ! -d "$NAPI_SRC" ]; then
-    echo "napi-mojo not installed in repo root — run: (cd $ROOT_DIR && npm install)" >&2
-    exit 1
-fi
 
 # Detect platform-specific shared library extension
 case "$(uname -s)" in

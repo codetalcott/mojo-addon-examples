@@ -388,7 +388,7 @@ All examples depend on napi-mojo for the N-API framework (`napi.types`, `napi.fr
 
 ### Common Patterns
 
-- **Zero-copy TypedArray access:** `JsTypedArray.data_ptr(env).bitcast[Float64]()` reads JS memory directly
+- **Zero-copy TypedArray access:** `JsTypedArray.data_ptr(env).unsafe_bitcast[Float64]()` reads JS memory directly
 - **SIMD vectorize:** `vectorize[simd_width_of[DType.float64]()](size, compute)` with `unified {mut}` closure
 - **Multi-core parallel:** `parallelize[worker](num_workers)` with `capturing` closure
 - **Runtime init:** `KGEN_CompilerRT_AsyncRT_CreateRuntime` via `OwnedDLHandle()` for parallelize in shared libs

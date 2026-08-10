@@ -7,6 +7,6 @@
 from std.math import sqrt
 
 
-@export("spike_tier0_compute", ABI="C")
-def compute(x: Float64) -> Float64:
+@export("spike_tier0_compute")
+def compute(x: Float64) abi("C") -> Float64:
     return sqrt(x) * 2.0

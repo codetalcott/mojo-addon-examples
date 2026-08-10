@@ -22,7 +22,7 @@
     "@qkstat/embed": "file:packages/embed",
     "@qkstat/rag": "file:packages/rag",
     "hnswlib-node": "^3.0.0",
-    "napi-mojo": "^0.6.0",
+    "napi-mojo": "https://codeload.github.com/codetalcott/napi-mojo/tar.gz/b6d7f39beb06bbbd8fe039d39d32a09f989d3a41",
     "onnxruntime-node": "^1.24.3"
   },
   "overrides": {

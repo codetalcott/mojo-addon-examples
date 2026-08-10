@@ -1,12 +1,12 @@
 ## Tier 3 — GPU + `layout` package (TileTensor), still no `linalg`.
 ##
 ## Adds the `layout` package on top of std.gpu.host. Same kernel functionally,
-## but uses TileTensor wrappers instead of raw UnsafePointer args. Tests the
+## but uses TileTensor wrappers instead of raw Pointer args. Tests the
 ## marginal cost of `layout` in dynamic dependencies — does the package live
 ## inside the MAX runtime or sit on top of std.gpu?
 
 from std.gpu import global_idx
-from std.gpu.host import DeviceContext
+from max.gpu.host import DeviceContext
 from std.math import ceildiv
 from std.sys import has_accelerator
 from layout import Coord, Idx, TileTensor, TensorLayout, row_major
@@ -26,8 +26,8 @@ def _double_kernel[Layout: TensorLayout](
         dst[tid] = src[tid] * 2.0
 
 
-@export("spike_tier3_gpu_double", ABI="C")
-def gpu_double(n: Int) -> Float32:
+@export("spike_tier3_gpu_double")
+def gpu_double(n: Int) abi("C") -> Float32:
     comptime if not has_accelerator():
         return -1.0
 

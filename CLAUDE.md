@@ -89,7 +89,7 @@ example-name/
   README.md            # per-example benchmark tables + caveats
 ```
 
-Kernels use napi-mojo's framework: `napi.types`, `napi.framework.js_typedarray`, `napi.framework.args`, `napi.framework.register.ModuleBuilder`. JS passes pre-allocated output buffers to avoid allocation in the hot path. `JsTypedArray.data_ptr(env).bitcast[Float64]()` gives zero-copy access to V8 memory. `parallelize()` requires `init_async_runtime()` to be called once at module load.
+Kernels use napi-mojo's framework: `napi.types`, `napi.framework.js_typedarray`, `napi.framework.args`, `napi.framework.register.ModuleBuilder`. JS passes pre-allocated output buffers to avoid allocation in the hot path. `JsTypedArray.data_ptr(env).unsafe_bitcast[Float64]()` gives zero-copy access to V8 memory. `parallelize()` requires `init_async_runtime()` to be called once at module load.
 
 ### One-shot vs cached (persistent-buffer) API
 
@@ -99,7 +99,7 @@ When adding a new GPU kernel, prefer the cached pattern if the input is large an
 
 ### `packages/rag` specifics
 
-- Source: [`packages/rag/src/lib.mojo`](packages/rag/src/lib.mojo) (N-API surface) + `packages/rag/src/kernels.mojo`. Built with `-I src -I node_modules/napi-mojo/src` so `lib.mojo` can `from linalg import ...` from MAX.
+- Source: [`packages/rag/src/lib.mojo`](packages/rag/src/lib.mojo) (N-API surface) + `packages/rag/src/kernels.mojo`. Built with `-I src -I "$NAPI_SRC"` (see [`scripts/napi-include.sh`](scripts/napi-include.sh)) so `lib.mojo` can `from linalg import ...` from MAX.
 - Loader: [`packages/rag/index.js`](packages/rag/index.js) tries the platform sub-package (`@qkstat/rag-darwin-arm64` / `@qkstat/rag-linux-x64`), then falls back to the local `build/rag.node`. The sub-packages live under `packages/rag/npm/`; bundling is `bash scripts/bundle-libs.sh`.
 - Tests: Jest under `packages/rag/tests/`. They require the addon to be built first.
 
@@ -113,7 +113,7 @@ The repo root's `pixi.toml` includes `transformers`, `safetensors`, etc. specifi
 
 ## Notable constraints
 
-- **Mojo version pin** lives in `pixi.toml` (`max = ">=26.3.0.dev..."`). Upgrading is scripted by `scripts/update-mojo-version.sh`.
+- **Mojo version pin** lives in `pixi.toml` (`max = "==26.6.0.dev..."`). Upgrading is scripted by `scripts/update-mojo-version.sh`. The pin must track whatever nightly the installed napi-mojo was migrated to — the framework ships Mojo *source*, so a mismatch surfaces as compile errors inside `node_modules/napi-mojo/src`, not in this repo's code.
 - **Apple Silicon GPU benchmarks** require Xcode's Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`). Without it, GPU builds on Darwin fail at link time.
 - **MAX on M4 is currently CPU-only for `packages/embed`** — `Accelerator()` init returns "Not implemented for device: Apple M4". All embed GPU iteration happens on RunPod.
 - **Node version**: `engines.node >=22.12` in `packages/rag`. Root examples also assume that.
@@ -121,7 +121,9 @@ The repo root's `pixi.toml` includes `transformers`, `safetensors`, etc. specifi
 
 ## napi-mojo linkage
 
-All examples depend on napi-mojo installed via npm (`node_modules/napi-mojo/src` provides the framework sources that `-I` pulls into Mojo builds). For local iteration against an unreleased napi-mojo:
+All examples depend on napi-mojo installed via npm, which provides the framework sources that `-I` pulls into Mojo builds. napi-mojo is a *source* framework (the node-addon-api model): `require('napi-mojo')` returns paths, not a compiled addon, and `.include` is the directory to pass to `mojo build -I`. Every `build.sh` resolves it through [`scripts/napi-include.sh`](scripts/napi-include.sh) rather than hardcoding `node_modules/napi-mojo/src`, so hoisting and `npm link` both work. The compiled demo addon, if you want it, is `require('napi-mojo/demo')`.
+
+For local iteration against an unreleased napi-mojo:
 
 ```bash
 cd /path/to/napi-mojo && npm link

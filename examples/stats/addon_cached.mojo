@@ -31,10 +31,12 @@
 from std.algorithm.functional import vectorize
 from std.sys import simd_width_of
 from std.math import sqrt, ceildiv
-from std.memory import alloc, unsafe_memcpy, stack_allocation
-from std.gpu import thread_idx, block_idx, barrier
-from std.gpu.memory import AddressSpace
-from std.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
+from std.memory import unsafe_memcpy, stack_allocation
+from std.memory.alloc import unsafe_alloc
+from std.gpu import thread_idx, block_idx
+from max.gpu import barrier
+from std.memory import AddressSpace
+from max.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error
@@ -67,7 +69,7 @@ struct GpuState(Movable):
 
 def _get_gpu_state(
     b: Bindings, env: NapiEnv
-) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
+) raises -> Pointer[GpuState, MutAnyOrigin]:
     try:
         return get_instance_data[GpuState](b, env)
     except:
@@ -77,36 +79,36 @@ def _get_gpu_state(
 # --- Quickselect + partition (copied from stats/addon.mojo) ------------------
 
 def _partition(
-    arr: UnsafePointer[Float64, MutAnyOrigin], lo: Int, hi: Int
+    arr: Pointer[Float64, MutAnyOrigin], lo: Int, hi: Int
 ) -> Int:
-    var pivot = arr[hi]
+    var pivot = arr[unsafe_offset=hi]
     var i = lo
     for j in range(lo, hi):
-        if arr[j] <= pivot:
-            var tmp = arr[i]
-            arr[i] = arr[j]
-            arr[j] = tmp
+        if arr[unsafe_offset=j] <= pivot:
+            var tmp = arr[unsafe_offset=i]
+            arr[unsafe_offset=i] = arr[unsafe_offset=j]
+            arr[unsafe_offset=j] = tmp
             i += 1
-    var tmp = arr[i]
-    arr[i] = arr[hi]
-    arr[hi] = tmp
+    var tmp = arr[unsafe_offset=i]
+    arr[unsafe_offset=i] = arr[unsafe_offset=hi]
+    arr[unsafe_offset=hi] = tmp
     return i
 
 
 def _quickselect(
-    arr: UnsafePointer[Float64, MutAnyOrigin], size: Int, k: Int
+    arr: Pointer[Float64, MutAnyOrigin], size: Int, k: Int
 ) -> Float64:
     var left = 0
     var right = size - 1
     while left < right:
         var pivot_idx = _partition(arr, left, right)
         if pivot_idx == k:
-            return arr[k]
+            return arr[unsafe_offset=k]
         elif pivot_idx < k:
             left = pivot_idx + 1
         else:
             right = pivot_idx - 1
-    return arr[left]
+    return arr[unsafe_offset=left]
 
 
 # --- CachedStats: persistent device buffers + heap Float64 copy --------------
@@ -131,7 +133,7 @@ struct CachedStats(Movable):
     var host_pmax: HostBuffer[DType.float32]
     var host_psq: HostBuffer[DType.float32]
     @__allow_legacy_any_origin_fields
-    var data_f64: UnsafePointer[Float64, MutAnyOrigin]
+    var data_f64: Pointer[Float64, MutAnyOrigin]
     var size: Int
     var num_blocks: Int
     var released: Bool
@@ -147,7 +149,7 @@ struct CachedStats(Movable):
         var host_pmin: HostBuffer[DType.float32],
         var host_pmax: HostBuffer[DType.float32],
         var host_psq: HostBuffer[DType.float32],
-        data_f64: UnsafePointer[Float64, MutAnyOrigin],
+        data_f64: Pointer[Float64, MutAnyOrigin],
         size: Int,
         num_blocks: Int,
     ):
@@ -165,19 +167,19 @@ struct CachedStats(Movable):
         self.num_blocks = num_blocks
         self.released = False
 
-    def __del__(deinit self):
+    def __deinit__(deinit self):
         # DeviceBuffer/HostBuffer destructors run automatically via field
         # teardown; the only field we own explicitly is the heap Float64 copy.
-        self.data_f64.free()
+        self.data_f64.unsafe_free()
 
 
 # --- GPU kernels (verbatim clone of stats/addon.mojo) ------------------------
 
 def _gpu_kernel_sum_min_max(
-    data: UnsafePointer[Float32, MutAnyOrigin],
-    partial_sum: UnsafePointer[Float32, MutAnyOrigin],
-    partial_min: UnsafePointer[Float32, MutAnyOrigin],
-    partial_max: UnsafePointer[Float32, MutAnyOrigin],
+    data: Pointer[Float32, MutAnyOrigin],
+    partial_sum: Pointer[Float32, MutAnyOrigin],
+    partial_min: Pointer[Float32, MutAnyOrigin],
+    partial_max: Pointer[Float32, MutAnyOrigin],
     size: Int,
 ):
     var s_sum = stack_allocation[
@@ -201,7 +203,7 @@ def _gpu_kernel_sum_min_max(
     for i in range(GPU_ELEMS_PER_THREAD):
         var idx = base + i * GPU_BLOCK
         if idx < size:
-            var v = data[idx]
+            var v = data[unsafe_offset=idx]
             local_sum += v
             if not seeded:
                 local_min = v
@@ -217,33 +219,33 @@ def _gpu_kernel_sum_min_max(
         local_min = 3.4e38
         local_max = -3.4e38
 
-    s_sum[tid] = local_sum
-    s_min[tid] = local_min
-    s_max[tid] = local_max
+    s_sum[unsafe_offset=tid] = local_sum
+    s_min[unsafe_offset=tid] = local_min
+    s_max[unsafe_offset=tid] = local_max
     barrier()
 
     var step = GPU_BLOCK // 2
     while step > 0:
         if tid < step:
-            s_sum[tid] = s_sum[tid] + s_sum[tid + step]
-            var a = s_min[tid]
-            var b = s_min[tid + step]
-            s_min[tid] = a if a < b else b
-            var c = s_max[tid]
-            var d = s_max[tid + step]
-            s_max[tid] = c if c > d else d
+            s_sum[unsafe_offset=tid] = s_sum[unsafe_offset=tid] + s_sum[unsafe_offset=tid + step]
+            var a = s_min[unsafe_offset=tid]
+            var b = s_min[unsafe_offset=tid + step]
+            s_min[unsafe_offset=tid] = a if a < b else b
+            var c = s_max[unsafe_offset=tid]
+            var d = s_max[unsafe_offset=tid + step]
+            s_max[unsafe_offset=tid] = c if c > d else d
         barrier()
         step //= 2
 
     if tid == 0:
-        partial_sum[bid] = s_sum[0]
-        partial_min[bid] = s_min[0]
-        partial_max[bid] = s_max[0]
+        partial_sum[unsafe_offset=bid] = s_sum[unsafe_offset=0]
+        partial_min[unsafe_offset=bid] = s_min[unsafe_offset=0]
+        partial_max[unsafe_offset=bid] = s_max[unsafe_offset=0]
 
 
 def _gpu_kernel_sum_sq_diff(
-    data: UnsafePointer[Float32, MutAnyOrigin],
-    partial: UnsafePointer[Float32, MutAnyOrigin],
+    data: Pointer[Float32, MutAnyOrigin],
+    partial: Pointer[Float32, MutAnyOrigin],
     mean: Float32,
     size: Int,
 ):
@@ -259,21 +261,21 @@ def _gpu_kernel_sum_sq_diff(
     for i in range(GPU_ELEMS_PER_THREAD):
         var idx = base + i * GPU_BLOCK
         if idx < size:
-            var d = data[idx] - mean
+            var d = data[unsafe_offset=idx] - mean
             local_sum += d * d
 
-    s_sum[tid] = local_sum
+    s_sum[unsafe_offset=tid] = local_sum
     barrier()
 
     var step = GPU_BLOCK // 2
     while step > 0:
         if tid < step:
-            s_sum[tid] = s_sum[tid] + s_sum[tid + step]
+            s_sum[unsafe_offset=tid] = s_sum[unsafe_offset=tid] + s_sum[unsafe_offset=tid + step]
         barrier()
         step //= 2
 
     if tid == 0:
-        partial[bid] = s_sum[0]
+        partial[unsafe_offset=bid] = s_sum[unsafe_offset=0]
 
 
 # --- Vectorized Float64 → Float32 cast ---------------------------------------
@@ -282,13 +284,13 @@ def _gpu_kernel_sum_sq_diff(
 # 10 ms (memory-bandwidth bound) vs the scalar original's ~50-100 ms.
 
 def _cast_f64_to_f32_simd(
-    src: UnsafePointer[Float64, MutAnyOrigin],
-    dst: UnsafePointer[Float32, MutAnyOrigin],
+    src: Pointer[Float64, MutAnyOrigin],
+    dst: Pointer[Float32, MutAnyOrigin],
     size: Int,
 ):
     def compute[width: Int](offset: Int) {imm src, imm dst}:
-        var chunk = src.load[width=width](offset)
-        dst.store[width=width](offset, chunk.cast[DType.float32]())
+        var chunk = src.unsafe_load[width=width](offset)
+        dst.unsafe_store[width=width](offset, chunk.cast[DType.float32]())
     vectorize[simd_width_of[DType.float64]()](size, compute)
 
 
@@ -296,7 +298,7 @@ def _cast_f64_to_f32_simd(
 
 def _load_stats_gpu(
     ctx: DeviceContext,
-    host_f64: UnsafePointer[Float64, MutAnyOrigin],
+    host_f64: Pointer[Float64, MutAnyOrigin],
     size: Int,
 ) raises -> CachedStats:
     var num_blocks = ceildiv(size, GPU_CHUNK)
@@ -324,7 +326,7 @@ def _load_stats_gpu(
     ctx.synchronize()
 
     # Heap Float64 copy for CPU-side percentile quickselect.
-    var data_f64 = alloc[Float64](size).as_unsafe_any_origin()
+    var data_f64 = unsafe_alloc[Float64](size).as_unsafe_any_origin()
     unsafe_memcpy(dest=data_f64, src=host_f64, count=size)
 
     return CachedStats(
@@ -353,7 +355,7 @@ def load_stats_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var size = Int(ta.length(b, env))
         if size == 0:
             raise Error("loadStatsGpu requires non-empty array")
-        var ptr = ta.data_ptr(b, env).bitcast[Float64]()
+        var ptr = ta.data_ptr(b, env).unsafe_bitcast[Float64]()
         var state = _get_gpu_state(b, env)
 
         var cs_val = _load_stats_gpu(state[].ctx, ptr, size)
@@ -367,8 +369,8 @@ def load_stats_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 def _stats_cached(
     ctx: DeviceContext,
-    cs: UnsafePointer[CachedStats, MutAnyOrigin],
-) raises -> InlineArray[Float64, 7]:
+    cs: Pointer[CachedStats, MutAnyOrigin],
+) raises -> Array[Float64, 7]:
     # Pass 1: sum + min + max. Persistent buffers, no alloc, no H2D.
     ctx.enqueue_function[_gpu_kernel_sum_min_max](
         cs[].dev_data.unsafe_ptr(),
@@ -389,14 +391,14 @@ def _stats_cached(
     var pmax_ptr = cs[].host_pmax.unsafe_ptr()
 
     var total_sum: Float64 = 0.0
-    var total_min: Float64 = Float64(pmin_ptr[0])
-    var total_max: Float64 = Float64(pmax_ptr[0])
+    var total_min: Float64 = Float64(pmin_ptr[unsafe_offset=0])
+    var total_max: Float64 = Float64(pmax_ptr[unsafe_offset=0])
     for i in range(cs[].num_blocks):
-        total_sum += Float64(psum_ptr[i])
-        var m = Float64(pmin_ptr[i])
+        total_sum += Float64(psum_ptr[unsafe_offset=i])
+        var m = Float64(pmin_ptr[unsafe_offset=i])
         if m < total_min:
             total_min = m
-        var M = Float64(pmax_ptr[i])
+        var M = Float64(pmax_ptr[unsafe_offset=i])
         if M > total_max:
             total_max = M
 
@@ -417,13 +419,13 @@ def _stats_cached(
     var psq_ptr = cs[].host_psq.unsafe_ptr()
     var sum_sq: Float64 = 0.0
     for i in range(cs[].num_blocks):
-        sum_sq += Float64(psq_ptr[i])
+        sum_sq += Float64(psq_ptr[unsafe_offset=i])
     var stddev = sqrt(sum_sq / Float64(cs[].size))
 
     # Pass 3: percentiles via quickselect on a scratch copy of the Float64
     # cache. Same as stats/addon.mojo _compute_stats — we don't mutate the
     # persistent data_f64 copy because quickselect is destructive.
-    var scratch = alloc[Float64](cs[].size).as_unsafe_any_origin()
+    var scratch = unsafe_alloc[Float64](cs[].size).as_unsafe_any_origin()
     unsafe_memcpy(dest=scratch, src=cs[].data_f64, count=cs[].size)
 
     var p50_idx = Int(Float64(cs[].size - 1) * 0.5)
@@ -433,9 +435,9 @@ def _stats_cached(
     var p50 = _quickselect(scratch, cs[].size, p50_idx)
     var p95 = _quickselect(scratch, cs[].size, p95_idx)
     var p99 = _quickselect(scratch, cs[].size, p99_idx)
-    scratch.free()
+    scratch.unsafe_free()
 
-    var result = InlineArray[Float64, 7](fill=mean)
+    var result = Array[Float64, 7](fill=mean)
     result[1] = stddev
     result[2] = total_min
     result[3] = total_max
@@ -497,15 +499,15 @@ def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     except:
         pass
 
-    var bindings_ptr = alloc[NapiBindings](1)
+    var bindings_ptr = unsafe_alloc[NapiBindings](1)
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
         bindings_ptr.unsafe_write(bindings^)
     except:
-        bindings_ptr.free()
+        bindings_ptr.unsafe_free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
+    var cb_data = bindings_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin()
 
     try:
         var ctx = DeviceContext()

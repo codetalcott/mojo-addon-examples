@@ -14,10 +14,12 @@
 ## Build: pixi run bash simd-search/build_cached.sh
 
 from std.math import ceildiv
-from std.memory import alloc, unsafe_memcpy, stack_allocation
-from std.gpu import thread_idx, block_idx, barrier
-from std.gpu.memory import AddressSpace
-from std.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
+from std.memory import unsafe_memcpy, stack_allocation
+from std.memory.alloc import unsafe_alloc
+from std.gpu import thread_idx, block_idx
+from max.gpu import barrier
+from std.memory import AddressSpace
+from max.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error
@@ -51,7 +53,7 @@ struct GpuState(Movable):
 
 def _get_gpu_state(
     b: Bindings, env: NapiEnv
-) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
+) raises -> Pointer[GpuState, MutAnyOrigin]:
     try:
         return get_instance_data[GpuState](b, env)
     except:
@@ -100,8 +102,8 @@ struct CachedBuffer(Movable):
 # to shared memory, then block-wide tree reduction. One partial per block.
 
 def _gpu_kernel_count_byte(
-    data: UnsafePointer[Byte, MutAnyOrigin],
-    partial: UnsafePointer[UInt32, MutAnyOrigin],
+    data: Pointer[Byte, MutAnyOrigin],
+    partial: Pointer[UInt32, MutAnyOrigin],
     target: UInt32,
     size: Int,
 ):
@@ -117,28 +119,28 @@ def _gpu_kernel_count_byte(
     for i in range(GPU_ELEMS_PER_THREAD):
         var idx = base + i * GPU_BLOCK
         if idx < size:
-            if UInt32(data[idx]) == target:
+            if UInt32(data[unsafe_offset=idx]) == target:
                 local += 1
 
-    s_count[tid] = local
+    s_count[unsafe_offset=tid] = local
     barrier()
 
     var step = GPU_BLOCK // 2
     while step > 0:
         if tid < step:
-            s_count[tid] = s_count[tid] + s_count[tid + step]
+            s_count[unsafe_offset=tid] = s_count[unsafe_offset=tid] + s_count[unsafe_offset=tid + step]
         barrier()
         step //= 2
 
     if tid == 0:
-        partial[bid] = s_count[0]
+        partial[unsafe_offset=bid] = s_count[unsafe_offset=0]
 
 
 # --- Host pointer extraction (duplicated from addon.mojo) -------------------
 
 def _get_data_ptr(
     b: Bindings, env: NapiEnv, val: NapiValue
-) raises -> UnsafePointer[Byte, MutAnyOrigin]:
+) raises -> Pointer[Byte, MutAnyOrigin]:
     if JsBuffer.is_buffer(b, env, val):
         return JsBuffer(val).data_ptr(b, env)
     if JsTypedArray.is_typedarray(b, env, val):
@@ -158,7 +160,7 @@ def _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
 
 def _load_gpu(
     ctx: DeviceContext,
-    host_data: UnsafePointer[Byte, MutAnyOrigin],
+    host_data: Pointer[Byte, MutAnyOrigin],
     size: Int,
 ) raises -> CachedBuffer:
     var num_blocks = ceildiv(size, GPU_CHUNK)
@@ -198,7 +200,7 @@ def load_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 def _count_byte_cached(
     ctx: DeviceContext,
-    cb: UnsafePointer[CachedBuffer, MutAnyOrigin],
+    cb: Pointer[CachedBuffer, MutAnyOrigin],
     target: Byte,
 ) raises -> Int:
     ctx.enqueue_function[_gpu_kernel_count_byte](
@@ -215,7 +217,7 @@ def _count_byte_cached(
     var ptr = cb[].host_partial.unsafe_ptr()
     var total: Int = 0
     for i in range(cb[].num_blocks):
-        total += Int(ptr[i])
+        total += Int(ptr[unsafe_offset=i])
     return total
 
 
@@ -262,15 +264,15 @@ def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     except:
         pass
 
-    var bindings_ptr = alloc[NapiBindings](1)
+    var bindings_ptr = unsafe_alloc[NapiBindings](1)
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
         bindings_ptr.unsafe_write(bindings^)
     except:
-        bindings_ptr.free()
+        bindings_ptr.unsafe_free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
+    var cb_data = bindings_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin()
 
     try:
         var ctx = DeviceContext()

@@ -17,8 +17,9 @@
 ## Build: pixi run bash matmul/build_cached.sh
 
 from std.math import ceildiv
-from std.memory import alloc, unsafe_memcpy
-from std.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
+from std.memory import unsafe_memcpy
+from std.memory.alloc import unsafe_alloc
+from max.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
 
 from layout import Coord, TileTensor, row_major
 from linalg.matmul import matmul as linalg_matmul
@@ -60,7 +61,7 @@ struct GpuState(Movable):
 
 def _get_gpu_state(
     b: Bindings, env: NapiEnv
-) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
+) raises -> Pointer[GpuState, MutAnyOrigin]:
     try:
         return get_instance_data[GpuState](b, env)
     except:
@@ -91,7 +92,7 @@ struct CachedMatrix(Movable):
 
 def _load_matrix_gpu(
     ctx: DeviceContext,
-    src_bytes: UnsafePointer[Byte, MutAnyOrigin],
+    src_bytes: Pointer[Byte, MutAnyOrigin],
     rows: Int,
     cols: Int,
 ) raises -> CachedMatrix:
@@ -101,7 +102,7 @@ def _load_matrix_gpu(
     var dev_data = ctx.enqueue_create_buffer[dtype](num_elems)
     var staging = ctx.enqueue_create_host_buffer[dtype](num_elems)
     unsafe_memcpy(
-        dest=staging.unsafe_ptr().bitcast[Byte](),
+        dest=staging.unsafe_ptr().unsafe_bitcast[Byte](),
         src=src_bytes,
         count=num_bytes,
     )
@@ -132,9 +133,9 @@ def load_matrix_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 def _matmul_cached(
     ctx: DeviceContext,
-    a: UnsafePointer[CachedMatrix, MutAnyOrigin],
-    b: UnsafePointer[CachedMatrix, MutAnyOrigin],
-    dst_bytes: UnsafePointer[Byte, MutAnyOrigin],
+    a: Pointer[CachedMatrix, MutAnyOrigin],
+    b: Pointer[CachedMatrix, MutAnyOrigin],
+    dst_bytes: Pointer[Byte, MutAnyOrigin],
 ) raises:
     var M = a[].rows
     var K = a[].cols
@@ -161,7 +162,7 @@ def _matmul_cached(
 
     unsafe_memcpy(
         dest=dst_bytes,
-        src=host_c.unsafe_ptr().bitcast[Byte](),
+        src=host_c.unsafe_ptr().unsafe_bitcast[Byte](),
         count=c_elems * 4,
     )
 
@@ -216,11 +217,11 @@ def matmul_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 # simpler correct thing is a min-heap on the host, O(N log k) per row.
 
 def _topk_row(
-    row_scores: UnsafePointer[Float32, MutAnyOrigin],
+    row_scores: Pointer[Float32, MutAnyOrigin],
     n: Int,
     k: Int,
-    out_scores: UnsafePointer[Float32, MutAnyOrigin],
-    out_idx: UnsafePointer[UInt32, MutAnyOrigin],
+    out_scores: Pointer[Float32, MutAnyOrigin],
+    out_idx: Pointer[UInt32, MutAnyOrigin],
 ):
     # Build a min-heap of size k seeded with the first k scores, then replace
     # the root whenever a later element beats it. At the end heap-sort into
@@ -230,8 +231,8 @@ def _topk_row(
     var heap_n = k if k < n else n
 
     for i in range(heap_n):
-        out_scores[i] = row_scores[i]
-        out_idx[i] = UInt32(i)
+        out_scores[unsafe_offset=i] = row_scores[unsafe_offset=i]
+        out_idx[unsafe_offset=i] = UInt32(i)
 
     # Heapify (siftDown from last non-leaf).
     var i = heap_n // 2 - 1
@@ -241,10 +242,10 @@ def _topk_row(
 
     # Process remaining elements: swap into root if larger than current min.
     for j in range(heap_n, n):
-        var v = row_scores[j]
-        if v > out_scores[0]:
-            out_scores[0] = v
-            out_idx[0] = UInt32(j)
+        var v = row_scores[unsafe_offset=j]
+        if v > out_scores[unsafe_offset=0]:
+            out_scores[unsafe_offset=0] = v
+            out_idx[unsafe_offset=0] = UInt32(j)
             _sift_down(out_scores, out_idx, heap_n, 0)
 
     # Heap-sort with a min-heap: repeatedly swap root (current min) to the
@@ -252,24 +253,24 @@ def _topk_row(
     # element at the high end, so the final array is sorted descending.
     var end = heap_n - 1
     while end > 0:
-        var tmps = out_scores[0]
-        var tmpi = out_idx[0]
-        out_scores[0] = out_scores[end]
-        out_idx[0] = out_idx[end]
-        out_scores[end] = tmps
-        out_idx[end] = tmpi
+        var tmps = out_scores[unsafe_offset=0]
+        var tmpi = out_idx[unsafe_offset=0]
+        out_scores[unsafe_offset=0] = out_scores[unsafe_offset=end]
+        out_idx[unsafe_offset=0] = out_idx[unsafe_offset=end]
+        out_scores[unsafe_offset=end] = tmps
+        out_idx[unsafe_offset=end] = tmpi
         _sift_down(out_scores, out_idx, end, 0)
         end -= 1
 
     # If k > n, zero-fill the tail so callers don't read uninitialized memory.
     for j in range(heap_n, k):
-        out_scores[j] = 0.0
-        out_idx[j] = 0
+        out_scores[unsafe_offset=j] = 0.0
+        out_idx[unsafe_offset=j] = 0
 
 
 def _sift_down(
-    scores: UnsafePointer[Float32, MutAnyOrigin],
-    idx: UnsafePointer[UInt32, MutAnyOrigin],
+    scores: Pointer[Float32, MutAnyOrigin],
+    idx: Pointer[UInt32, MutAnyOrigin],
     n: Int,
     start: Int,
 ):
@@ -278,26 +279,26 @@ def _sift_down(
         var child = 2 * root + 1
         if child >= n:
             return
-        if child + 1 < n and scores[child + 1] < scores[child]:
+        if child + 1 < n and scores[unsafe_offset=child + 1] < scores[unsafe_offset=child]:
             child += 1
-        if scores[root] <= scores[child]:
+        if scores[unsafe_offset=root] <= scores[unsafe_offset=child]:
             return
-        var tmps = scores[root]
-        var tmpi = idx[root]
-        scores[root] = scores[child]
-        idx[root] = idx[child]
-        scores[child] = tmps
-        idx[child] = tmpi
+        var tmps = scores[unsafe_offset=root]
+        var tmpi = idx[unsafe_offset=root]
+        scores[unsafe_offset=root] = scores[unsafe_offset=child]
+        idx[unsafe_offset=root] = idx[unsafe_offset=child]
+        scores[unsafe_offset=child] = tmps
+        idx[unsafe_offset=child] = tmpi
         root = child
 
 
 def _search_cached(
     ctx: DeviceContext,
-    a: UnsafePointer[CachedMatrix, MutAnyOrigin],
-    b: UnsafePointer[CachedMatrix, MutAnyOrigin],
+    a: Pointer[CachedMatrix, MutAnyOrigin],
+    b: Pointer[CachedMatrix, MutAnyOrigin],
     k: Int,
-    out_idx: UnsafePointer[UInt32, MutAnyOrigin],
-    out_scores: UnsafePointer[Float32, MutAnyOrigin],
+    out_idx: Pointer[UInt32, MutAnyOrigin],
+    out_scores: Pointer[Float32, MutAnyOrigin],
 ) raises:
     var M = a[].rows
     var K = a[].cols
@@ -319,11 +320,11 @@ def _search_cached(
     var host_ptr = host_c.unsafe_ptr().as_unsafe_any_origin()
     for row in range(M):
         _topk_row(
-            host_ptr + row * N,
+            host_ptr.unsafe_offset(row * N),
             N,
             k,
-            out_scores + row * k,
-            out_idx + row * k,
+            out_scores.unsafe_offset(row * k),
+            out_idx.unsafe_offset(row * k),
         )
 
 
@@ -361,8 +362,8 @@ def search_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         if k <= 0:
             raise Error("searchHandle: k must be > 0")
 
-        var idx_ptr = idx_ta.data_ptr(b, env).bitcast[UInt32]()
-        var scores_ptr = scores_ta.data_ptr(b, env).bitcast[Float32]()
+        var idx_ptr = idx_ta.data_ptr(b, env).unsafe_bitcast[UInt32]()
+        var scores_ptr = scores_ta.data_ptr(b, env).unsafe_bitcast[Float32]()
 
         var state = _get_gpu_state(b, env)
         _search_cached(state[].ctx, a, b_mat, k, idx_ptr, scores_ptr)
@@ -397,15 +398,15 @@ def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     except:
         pass
 
-    var bindings_ptr = alloc[NapiBindings](1)
+    var bindings_ptr = unsafe_alloc[NapiBindings](1)
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
         bindings_ptr.unsafe_write(bindings^)
     except:
-        bindings_ptr.free()
+        bindings_ptr.unsafe_free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
+    var cb_data = bindings_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin()
 
     try:
         var ctx = DeviceContext()

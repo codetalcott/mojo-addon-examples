@@ -12,9 +12,10 @@
 from std.algorithm.functional import vectorize
 from std.sys import simd_width_of
 from std.math import ceildiv
-from std.memory import alloc, unsafe_memcpy
+from std.memory import unsafe_memcpy
+from std.memory.alloc import unsafe_alloc
 from std.gpu import global_idx
-from std.gpu.host import DeviceContext
+from max.gpu.host import DeviceContext
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error, check_status
@@ -51,19 +52,19 @@ def _gpu_state_finalize(
     data: OpaquePointer[MutAnyOrigin],
     hint: OpaquePointer[MutAnyOrigin],
 ):
-    var ptr = data.bitcast[GpuState]()
+    var ptr = data.unsafe_bitcast[GpuState]()
     ptr.unsafe_deinit_pointee()
-    ptr.free()
+    ptr.unsafe_free()
 
 
 def _get_gpu_state(
     b: Bindings, env: NapiEnv
-) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
+) raises -> Pointer[GpuState, MutAnyOrigin]:
     var data = OpaquePointer[MutAnyOrigin](unsafe_from_address=Int(0))
-    _ = raw_get_instance_data(b, env, UnsafePointer(to=data).bitcast[NoneType]().as_unsafe_any_origin())
+    _ = raw_get_instance_data(b, env, Pointer(to=data).unsafe_bitcast[NoneType]().as_unsafe_any_origin())
     if Int(data) == 0:
         raise Error("grayscaleGpu requires a GPU (no accelerator found)")
-    return data.bitcast[GpuState]()
+    return data.unsafe_bitcast[GpuState]()
 
 
 # --- Grayscale kernel ---------------------------------------------------------
@@ -71,28 +72,28 @@ def _get_gpu_state(
 # Treats each RGBA pixel as a UInt32 lane — extract R/G/B via shifts, pack back.
 
 def _grayscale_rows(
-    src: UnsafePointer[Byte, MutAnyOrigin],
-    dst: UnsafePointer[Byte, MutAnyOrigin],
+    src: Pointer[Byte, MutAnyOrigin],
+    dst: Pointer[Byte, MutAnyOrigin],
     start_row: Int, end_row: Int, width: Int,
 ):
-    var src32 = src.bitcast[UInt32]()
-    var dst32 = dst.bitcast[UInt32]()
+    var src32 = src.unsafe_bitcast[UInt32]()
+    var dst32 = dst.unsafe_bitcast[UInt32]()
     var base = start_row * width
     var num_pixels = (end_row - start_row) * width
     def compute[w: Int](offset: Int) {imm src32, imm dst32, imm base}:
-        var pixels = src32.load[width=w](base + offset)
+        var pixels = src32.unsafe_load[width=w](base + offset)
         var r = pixels & SIMD[DType.uint32, w](0xFF)
         var g = (pixels >> 8) & SIMD[DType.uint32, w](0xFF)
         var b_ch = (pixels >> 16) & SIMD[DType.uint32, w](0xFF)
         var a = pixels & SIMD[DType.uint32, w](0xFF000000)
         var gray = (77 * r + 150 * g + 29 * b_ch) >> 8
-        dst32.store[width=w](base + offset, gray | (gray << 8) | (gray << 16) | a)
+        dst32.unsafe_store[width=w](base + offset, gray | (gray << 8) | (gray << 16) | a)
     vectorize[simd_width_of[DType.uint32]()](num_pixels, compute)
 
 
 def _grayscale_parallel(
-    src: UnsafePointer[Byte, MutAnyOrigin],
-    dst: UnsafePointer[Byte, MutAnyOrigin],
+    src: Pointer[Byte, MutAnyOrigin],
+    dst: Pointer[Byte, MutAnyOrigin],
     width: Int, height: Int,
 ):
     def worker(wid: Int) capturing:
@@ -113,26 +114,26 @@ def _grayscale_parallel(
 # No shared memory, no reduction — pure elementwise. Metal-safe (integer only).
 
 def _gpu_kernel_grayscale(
-    src: UnsafePointer[UInt32, MutAnyOrigin],
-    dst: UnsafePointer[UInt32, MutAnyOrigin],
+    src: Pointer[UInt32, MutAnyOrigin],
+    dst: Pointer[UInt32, MutAnyOrigin],
     num_pixels: Int,
 ):
     var tid = Int(global_idx.x)
     if tid >= num_pixels:
         return
-    var pixel = src[tid]
+    var pixel = src[unsafe_offset=tid]
     var r = pixel & 0xFF
     var g = (pixel >> 8) & 0xFF
     var b_ch = (pixel >> 16) & 0xFF
     var a = pixel & 0xFF000000
     var gray = (77 * r + 150 * g + 29 * b_ch) >> 8
-    dst[tid] = gray | (gray << 8) | (gray << 16) | a
+    dst[unsafe_offset=tid] = gray | (gray << 8) | (gray << 16) | a
 
 
 def _grayscale_gpu(
     ctx: DeviceContext,
-    src: UnsafePointer[Byte, MutAnyOrigin],
-    dst: UnsafePointer[Byte, MutAnyOrigin],
+    src: Pointer[Byte, MutAnyOrigin],
+    dst: Pointer[Byte, MutAnyOrigin],
     width: Int, height: Int,
 ) raises:
     var num_pixels = width * height
@@ -143,7 +144,7 @@ def _grayscale_gpu(
     var host_src = ctx.enqueue_create_host_buffer[DType.uint32](num_pixels)
 
     unsafe_memcpy(
-        dest=host_src.unsafe_ptr().bitcast[Byte](),
+        dest=host_src.unsafe_ptr().unsafe_bitcast[Byte](),
         src=src,
         count=num_bytes,
     )
@@ -164,7 +165,7 @@ def _grayscale_gpu(
 
     unsafe_memcpy(
         dest=dst,
-        src=host_dst.unsafe_ptr().bitcast[Byte](),
+        src=host_dst.unsafe_ptr().unsafe_bitcast[Byte](),
         count=num_bytes,
     )
 
@@ -174,17 +175,17 @@ def _grayscale_gpu(
 # SIMD clamp replaces per-byte branch.
 
 def _brightness_rows(
-    src: UnsafePointer[Byte, MutAnyOrigin],
-    dst: UnsafePointer[Byte, MutAnyOrigin],
+    src: Pointer[Byte, MutAnyOrigin],
+    dst: Pointer[Byte, MutAnyOrigin],
     start_row: Int, end_row: Int, width: Int,
     factor_fp: UInt32,
 ):
-    var src32 = src.bitcast[UInt32]()
-    var dst32 = dst.bitcast[UInt32]()
+    var src32 = src.unsafe_bitcast[UInt32]()
+    var dst32 = dst.unsafe_bitcast[UInt32]()
     var base = start_row * width
     var num_pixels = (end_row - start_row) * width
     def compute[w: Int](offset: Int) {imm src32, imm dst32, imm base, imm factor_fp}:
-        var pixels = src32.load[width=w](base + offset)
+        var pixels = src32.unsafe_load[width=w](base + offset)
         var r = pixels & SIMD[DType.uint32, w](0xFF)
         var g = (pixels >> 8) & SIMD[DType.uint32, w](0xFF)
         var b_ch = (pixels >> 16) & SIMD[DType.uint32, w](0xFF)
@@ -193,13 +194,13 @@ def _brightness_rows(
         var nr = ((r * fp) >> 8).clamp(0, 255)
         var ng = ((g * fp) >> 8).clamp(0, 255)
         var nb = ((b_ch * fp) >> 8).clamp(0, 255)
-        dst32.store[width=w](base + offset, nr | (ng << 8) | (nb << 16) | a)
+        dst32.unsafe_store[width=w](base + offset, nr | (ng << 8) | (nb << 16) | a)
     vectorize[simd_width_of[DType.uint32]()](num_pixels, compute)
 
 
 def _brightness_parallel(
-    src: UnsafePointer[Byte, MutAnyOrigin],
-    dst: UnsafePointer[Byte, MutAnyOrigin],
+    src: Pointer[Byte, MutAnyOrigin],
+    dst: Pointer[Byte, MutAnyOrigin],
     width: Int, height: Int, factor_fp: UInt32,
 ):
     def worker(wid: Int) capturing:
@@ -219,17 +220,17 @@ def _brightness_parallel(
 # Grayscale then compare: SIMD select outputs 0x00FFFFFF or 0x000000, preserve alpha.
 
 def _threshold_rows(
-    src: UnsafePointer[Byte, MutAnyOrigin],
-    dst: UnsafePointer[Byte, MutAnyOrigin],
+    src: Pointer[Byte, MutAnyOrigin],
+    dst: Pointer[Byte, MutAnyOrigin],
     start_row: Int, end_row: Int, width: Int,
     thresh: Byte,
 ):
-    var src32 = src.bitcast[UInt32]()
-    var dst32 = dst.bitcast[UInt32]()
+    var src32 = src.unsafe_bitcast[UInt32]()
+    var dst32 = dst.unsafe_bitcast[UInt32]()
     var base = start_row * width
     var num_pixels = (end_row - start_row) * width
     def compute[w: Int](offset: Int) {imm src32, imm dst32, imm base, imm thresh}:
-        var pixels = src32.load[width=w](base + offset)
+        var pixels = src32.unsafe_load[width=w](base + offset)
         var r = pixels & SIMD[DType.uint32, w](0xFF)
         var g = (pixels >> 8) & SIMD[DType.uint32, w](0xFF)
         var b_ch = (pixels >> 16) & SIMD[DType.uint32, w](0xFF)
@@ -239,13 +240,13 @@ def _threshold_rows(
         # so bit 31 is set. Shift it down to get 0 (above) or 1 (below).
         var below = (gray - SIMD[DType.uint32, w](UInt32(thresh))) >> 31
         var rgb = (SIMD[DType.uint32, w](1) - below) * SIMD[DType.uint32, w](0x00FFFFFF)
-        dst32.store[width=w](base + offset, rgb | a)
+        dst32.unsafe_store[width=w](base + offset, rgb | a)
     vectorize[simd_width_of[DType.uint32]()](num_pixels, compute)
 
 
 def _threshold_parallel(
-    src: UnsafePointer[Byte, MutAnyOrigin],
-    dst: UnsafePointer[Byte, MutAnyOrigin],
+    src: Pointer[Byte, MutAnyOrigin],
+    dst: Pointer[Byte, MutAnyOrigin],
     width: Int, height: Int, thresh: Byte,
 ):
     def worker(wid: Int) capturing:
@@ -267,8 +268,8 @@ def _threshold_parallel(
 # Edge handling: clamp indices to [0, dim-1]
 
 def _blur_horizontal_rows(
-    src: UnsafePointer[Byte, MutAnyOrigin],
-    dst: UnsafePointer[Byte, MutAnyOrigin],
+    src: Pointer[Byte, MutAnyOrigin],
+    dst: Pointer[Byte, MutAnyOrigin],
     start_row: Int, end_row: Int, width: Int, radius: Int,
 ):
     var diameter = 2 * radius + 1
@@ -283,27 +284,27 @@ def _blur_horizontal_rows(
                 sx = 0
             if sx >= width:
                 sx = width - 1
-            running_sum += src.load[width=4](row_off + sx * 4).cast[DType.uint32]()
-        dst.store[width=4](row_off, (running_sum // diam).cast[DType.uint8]())
+            running_sum += src.unsafe_load[width=4](row_off + sx * 4).cast[DType.uint32]()
+        dst.unsafe_store[width=4](row_off, (running_sum // diam).cast[DType.uint8]())
 
         # Slide window across row
         for x in range(1, width):
             var add_x = x + radius
             if add_x >= width:
                 add_x = width - 1
-            running_sum += src.load[width=4](row_off + add_x * 4).cast[DType.uint32]()
+            running_sum += src.unsafe_load[width=4](row_off + add_x * 4).cast[DType.uint32]()
 
             var rem_x = x - radius - 1
             if rem_x < 0:
                 rem_x = 0
-            running_sum -= src.load[width=4](row_off + rem_x * 4).cast[DType.uint32]()
+            running_sum -= src.unsafe_load[width=4](row_off + rem_x * 4).cast[DType.uint32]()
 
-            dst.store[width=4](row_off + x * 4, (running_sum // diam).cast[DType.uint8]())
+            dst.unsafe_store[width=4](row_off + x * 4, (running_sum // diam).cast[DType.uint8]())
 
 
 def _blur_vertical_cols(
-    src: UnsafePointer[Byte, MutAnyOrigin],
-    dst: UnsafePointer[Byte, MutAnyOrigin],
+    src: Pointer[Byte, MutAnyOrigin],
+    dst: Pointer[Byte, MutAnyOrigin],
     start_col: Int, end_col: Int, width: Int, height: Int, radius: Int,
 ):
     var diameter = 2 * radius + 1
@@ -318,31 +319,31 @@ def _blur_vertical_cols(
                 sy = 0
             if sy >= height:
                 sy = height - 1
-            running_sum += src.load[width=4](sy * width * 4 + col_off).cast[DType.uint32]()
-        dst.store[width=4](col_off, (running_sum // diam).cast[DType.uint8]())
+            running_sum += src.unsafe_load[width=4](sy * width * 4 + col_off).cast[DType.uint32]()
+        dst.unsafe_store[width=4](col_off, (running_sum // diam).cast[DType.uint8]())
 
         # Slide window down column
         for y in range(1, height):
             var add_y = y + radius
             if add_y >= height:
                 add_y = height - 1
-            running_sum += src.load[width=4](add_y * width * 4 + col_off).cast[DType.uint32]()
+            running_sum += src.unsafe_load[width=4](add_y * width * 4 + col_off).cast[DType.uint32]()
 
             var rem_y = y - radius - 1
             if rem_y < 0:
                 rem_y = 0
-            running_sum -= src.load[width=4](rem_y * width * 4 + col_off).cast[DType.uint32]()
+            running_sum -= src.unsafe_load[width=4](rem_y * width * 4 + col_off).cast[DType.uint32]()
 
-            dst.store[width=4](y * width * 4 + col_off, (running_sum // diam).cast[DType.uint8]())
+            dst.unsafe_store[width=4](y * width * 4 + col_off, (running_sum // diam).cast[DType.uint8]())
 
 
 def _blur_parallel(
-    src: UnsafePointer[Byte, MutAnyOrigin],
-    dst: UnsafePointer[Byte, MutAnyOrigin],
+    src: Pointer[Byte, MutAnyOrigin],
+    dst: Pointer[Byte, MutAnyOrigin],
     width: Int, height: Int, radius: Int,
 ):
     # Temp buffer for intermediate result between passes
-    var temp = alloc[Byte](width * height * 4).as_unsafe_any_origin()
+    var temp = unsafe_alloc[Byte](width * height * 4).as_unsafe_any_origin()
 
     # Horizontal pass: src → temp, parallelize across rows
     var rows_per = height // NUM_WORKERS
@@ -360,7 +361,7 @@ def _blur_parallel(
         _blur_vertical_cols(temp, dst, s, e, width, height, radius)
     parallelize_safe[v_worker](NUM_WORKERS)
 
-    temp.free()
+    temp.unsafe_free()
 
 
 # --- N-API callbacks ----------------------------------------------------------
@@ -474,29 +475,29 @@ def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     except:
         pass
 
-    var bindings_ptr = alloc[NapiBindings](1)
+    var bindings_ptr = unsafe_alloc[NapiBindings](1)
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
         bindings_ptr.unsafe_write(bindings^)
     except:
-        bindings_ptr.free()
+        bindings_ptr.unsafe_free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
+    var cb_data = bindings_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin()
 
     # Cache a DeviceContext if a GPU is available. Skip silently if not.
     try:
         var ctx = DeviceContext()
-        var state_ptr = alloc[GpuState](1)
+        var state_ptr = unsafe_alloc[GpuState](1)
         state_ptr.unsafe_write(GpuState(ctx^))
         var fin_ref = _gpu_state_finalize
-        var fin_ptr = UnsafePointer(to=fin_ref).bitcast[
+        var fin_ptr = Pointer(to=fin_ref).unsafe_bitcast[
             OpaquePointer[MutAnyOrigin]
         ]()[]
         _ = raw_set_instance_data(
             bindings_ptr.as_unsafe_any_origin(),
             env,
-            state_ptr.bitcast[NoneType]().as_unsafe_any_origin(),
+            state_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin(),
             fin_ptr,
             OpaquePointer[MutAnyOrigin](unsafe_from_address=Int(0)),
         )
