@@ -7,7 +7,8 @@
 ## Build:  pixi run bash wyhash/build.sh
 ## Run:    node wyhash/hash.js
 
-from std.memory import bitcast, alloc
+from std.memory import bitcast
+from std.memory.alloc import unsafe_alloc
 
 from napi.types import NapiEnv, NapiValue, NAPI_TYPE_NUMBER, NAPI_TYPE_BIGINT
 from napi.error import throw_js_error
@@ -38,24 +39,24 @@ def _wymum(a: UInt64, b: UInt64) -> UInt64:
     return parts[0] ^ parts[1]
 
 
-def _wyr8(p: UnsafePointer[Byte, MutAnyOrigin], offset: Int) -> UInt64:
+def _wyr8(p: Pointer[Byte, MutAnyOrigin], offset: Int) -> UInt64:
     """Read 8 bytes as little-endian UInt64."""
-    return (p + offset).bitcast[UInt64]()[]
+    return p.unsafe_offset(offset).unsafe_bitcast[UInt64]()[]
 
 
-def _wyr4(p: UnsafePointer[Byte, MutAnyOrigin], offset: Int) -> UInt64:
+def _wyr4(p: Pointer[Byte, MutAnyOrigin], offset: Int) -> UInt64:
     """Read 4 bytes as little-endian UInt32, zero-extend to UInt64."""
-    return UInt64((p + offset).bitcast[UInt32]()[])
+    return UInt64(p.unsafe_offset(offset).unsafe_bitcast[UInt32]()[])
 
 
-def _wyr3(p: UnsafePointer[Byte, MutAnyOrigin], k: Int, length: Int) -> UInt64:
+def _wyr3(p: Pointer[Byte, MutAnyOrigin], k: Int, length: Int) -> UInt64:
     """Read 1-3 bytes into a UInt64."""
-    return (UInt64(p[k]) << 16) | (UInt64(p[k + (length >> 1)]) << 8) | UInt64(p[k + length - 1])
+    return (UInt64(p[unsafe_offset=k]) << 16) | (UInt64(p[unsafe_offset=k + (length >> 1)]) << 8) | UInt64(p[unsafe_offset=k + length - 1])
 
 
 # --- wyhash main function ----------------------------------------------------
 
-def wyhash(data: UnsafePointer[Byte, MutAnyOrigin], length: Int, in_seed: UInt64) -> UInt64:
+def wyhash(data: Pointer[Byte, MutAnyOrigin], length: Int, in_seed: UInt64) -> UInt64:
     var seed = in_seed ^ _wymum(in_seed ^ _WYP0, _WYP1)
     var a: UInt64 = 0
     var b: UInt64 = 0
@@ -103,7 +104,7 @@ def wyhash(data: UnsafePointer[Byte, MutAnyOrigin], length: Int, in_seed: UInt64
 
 # --- Helper: get byte pointer + length from Buffer or Uint8Array -------------
 
-def _get_data_ptr(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UnsafePointer[Byte, MutAnyOrigin]:
+def _get_data_ptr(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Pointer[Byte, MutAnyOrigin]:
     if JsBuffer.is_buffer(b, env, val):
         return JsBuffer(val).data_ptr(b, env)
     if JsTypedArray.is_typedarray(b, env, val):
@@ -173,15 +174,15 @@ def wy_hash64_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 @export("napi_register_module_v1")
 def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
-    var bindings_ptr = alloc[NapiBindings](1)
+    var bindings_ptr = unsafe_alloc[NapiBindings](1)
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
         bindings_ptr.unsafe_write(bindings^)
     except:
-        bindings_ptr.free()
+        bindings_ptr.unsafe_free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
+    var cb_data = bindings_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin()
 
     var wh_ref = wy_hash_fn
     var wh64_ref = wy_hash64_fn

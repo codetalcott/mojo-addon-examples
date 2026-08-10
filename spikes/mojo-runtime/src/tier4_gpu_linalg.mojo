@@ -1,7 +1,7 @@
 ## Tier 4 — GPU + `layout` + `linalg.matmul[target="gpu"]` — current
 ## packages/rag baseline. Tests the marginal cost of `linalg` over `layout`.
 
-from std.gpu.host import DeviceContext
+from max.gpu.host import DeviceContext
 from std.sys import has_accelerator
 from layout import Coord, Idx, TileTensor, row_major
 from linalg.matmul import matmul as linalg_matmul
@@ -10,8 +10,8 @@ from linalg.matmul import matmul as linalg_matmul
 comptime dtype = DType.float32
 
 
-@export("spike_tier4_gpu_matmul", ABI="C")
-def gpu_matmul(m: Int, k: Int, n: Int) -> Float32:
+@export("spike_tier4_gpu_matmul")
+def gpu_matmul(m: Int, k: Int, n: Int) abi("C") -> Float32:
     comptime if not has_accelerator():
         return -1.0
 

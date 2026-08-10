@@ -19,8 +19,9 @@
 ## error. Registration always succeeds so module load never fails.
 
 from std.math import ceildiv
-from std.memory import alloc, unsafe_memcpy
-from std.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
+from std.memory import unsafe_memcpy
+from std.memory.alloc import unsafe_alloc
+from max.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
 
 from layout import Coord, TileTensor, row_major
 from linalg.matmul import matmul as linalg_matmul
@@ -71,7 +72,7 @@ struct GpuState(Movable):
 
 def _get_gpu_state(
     b: Bindings, env: NapiEnv
-) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
+) raises -> Pointer[GpuState, MutAnyOrigin]:
     try:
         return get_instance_data[GpuState](b, env)
     except:
@@ -102,7 +103,7 @@ struct CachedMatrix(Movable):
 
 def _load_matrix_gpu(
     ctx: DeviceContext,
-    src_bytes: UnsafePointer[Byte, MutAnyOrigin],
+    src_bytes: Pointer[Byte, MutAnyOrigin],
     rows: Int,
     cols: Int,
 ) raises -> CachedMatrix:
@@ -111,7 +112,7 @@ def _load_matrix_gpu(
 
     var dev_data = ctx.enqueue_create_buffer[dtype](num_elems)
     var staging = ctx.enqueue_create_host_buffer[dtype](num_elems)
-    var staging_ptr = staging.unsafe_ptr().bitcast[Byte]()
+    var staging_ptr = staging.unsafe_ptr().unsafe_bitcast[Byte]()
     unsafe_memcpy(dest=staging_ptr, src=src_bytes, count=num_bytes)
     ctx.enqueue_copy(dev_data, staging)
     ctx.synchronize()
@@ -140,9 +141,9 @@ def load_matrix_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 def _matmul_cached(
     ctx: DeviceContext,
-    a: UnsafePointer[CachedMatrix, MutAnyOrigin],
-    b: UnsafePointer[CachedMatrix, MutAnyOrigin],
-    dst_bytes: UnsafePointer[Byte, MutAnyOrigin],
+    a: Pointer[CachedMatrix, MutAnyOrigin],
+    b: Pointer[CachedMatrix, MutAnyOrigin],
+    dst_bytes: Pointer[Byte, MutAnyOrigin],
 ) raises:
     var M = a[].rows
     var K = a[].cols
@@ -167,7 +168,7 @@ def _matmul_cached(
     ctx.enqueue_copy(host_c, dev_c)
     ctx.synchronize()
 
-    var host_ptr = host_c.unsafe_ptr().bitcast[Byte]()
+    var host_ptr = host_c.unsafe_ptr().unsafe_bitcast[Byte]()
     unsafe_memcpy(dest=dst_bytes, src=host_ptr, count=c_elems * 4)
 
 
@@ -219,11 +220,11 @@ def matmul_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 # simpler correct thing is a min-heap on the host, O(N log k) per row.
 
 def _topk_row(
-    row_scores: UnsafePointer[Float32, MutAnyOrigin],
+    row_scores: Pointer[Float32, MutAnyOrigin],
     n: Int,
     k: Int,
-    out_scores: UnsafePointer[Float32, MutAnyOrigin],
-    out_idx: UnsafePointer[UInt32, MutAnyOrigin],
+    out_scores: Pointer[Float32, MutAnyOrigin],
+    out_idx: Pointer[UInt32, MutAnyOrigin],
 ):
     # Build a min-heap of size k seeded with the first k scores, then replace
     # the root whenever a later element beats it. At the end heap-sort into
@@ -233,8 +234,8 @@ def _topk_row(
     var heap_n = k if k < n else n
 
     for i in range(heap_n):
-        out_scores[i] = row_scores[i]
-        out_idx[i] = UInt32(i)
+        out_scores[unsafe_offset=i] = row_scores[unsafe_offset=i]
+        out_idx[unsafe_offset=i] = UInt32(i)
 
     var i = heap_n // 2 - 1
     while i >= 0:
@@ -242,10 +243,10 @@ def _topk_row(
         i -= 1
 
     for j in range(heap_n, n):
-        var v = row_scores[j]
-        if v > out_scores[0]:
-            out_scores[0] = v
-            out_idx[0] = UInt32(j)
+        var v = row_scores[unsafe_offset=j]
+        if v > out_scores[unsafe_offset=0]:
+            out_scores[unsafe_offset=0] = v
+            out_idx[unsafe_offset=0] = UInt32(j)
             _sift_down(out_scores, out_idx, heap_n, 0)
 
     # Heap-sort with a min-heap: repeatedly swap root (current min) to the
@@ -253,24 +254,24 @@ def _topk_row(
     # element at the high end, so the final array is sorted descending.
     var end = heap_n - 1
     while end > 0:
-        var tmps = out_scores[0]
-        var tmpi = out_idx[0]
-        out_scores[0] = out_scores[end]
-        out_idx[0] = out_idx[end]
-        out_scores[end] = tmps
-        out_idx[end] = tmpi
+        var tmps = out_scores[unsafe_offset=0]
+        var tmpi = out_idx[unsafe_offset=0]
+        out_scores[unsafe_offset=0] = out_scores[unsafe_offset=end]
+        out_idx[unsafe_offset=0] = out_idx[unsafe_offset=end]
+        out_scores[unsafe_offset=end] = tmps
+        out_idx[unsafe_offset=end] = tmpi
         _sift_down(out_scores, out_idx, end, 0)
         end -= 1
 
     # If k > n, zero-fill the tail so callers don't read uninitialized memory.
     for j in range(heap_n, k):
-        out_scores[j] = 0.0
-        out_idx[j] = 0
+        out_scores[unsafe_offset=j] = 0.0
+        out_idx[unsafe_offset=j] = 0
 
 
 def _sift_down(
-    scores: UnsafePointer[Float32, MutAnyOrigin],
-    idx: UnsafePointer[UInt32, MutAnyOrigin],
+    scores: Pointer[Float32, MutAnyOrigin],
+    idx: Pointer[UInt32, MutAnyOrigin],
     n: Int,
     start: Int,
 ):
@@ -279,26 +280,26 @@ def _sift_down(
         var child = 2 * root + 1
         if child >= n:
             return
-        if child + 1 < n and scores[child + 1] < scores[child]:
+        if child + 1 < n and scores[unsafe_offset=child + 1] < scores[unsafe_offset=child]:
             child += 1
-        if scores[root] <= scores[child]:
+        if scores[unsafe_offset=root] <= scores[unsafe_offset=child]:
             return
-        var tmps = scores[root]
-        var tmpi = idx[root]
-        scores[root] = scores[child]
-        idx[root] = idx[child]
-        scores[child] = tmps
-        idx[child] = tmpi
+        var tmps = scores[unsafe_offset=root]
+        var tmpi = idx[unsafe_offset=root]
+        scores[unsafe_offset=root] = scores[unsafe_offset=child]
+        idx[unsafe_offset=root] = idx[unsafe_offset=child]
+        scores[unsafe_offset=child] = tmps
+        idx[unsafe_offset=child] = tmpi
         root = child
 
 
 def _search_cached(
     ctx: DeviceContext,
-    a: UnsafePointer[CachedMatrix, MutAnyOrigin],
-    b: UnsafePointer[CachedMatrix, MutAnyOrigin],
+    a: Pointer[CachedMatrix, MutAnyOrigin],
+    b: Pointer[CachedMatrix, MutAnyOrigin],
     k: Int,
-    out_idx: UnsafePointer[UInt32, MutAnyOrigin],
-    out_scores: UnsafePointer[Float32, MutAnyOrigin],
+    out_idx: Pointer[UInt32, MutAnyOrigin],
+    out_scores: Pointer[Float32, MutAnyOrigin],
 ) raises:
     var M = a[].rows
     var K = a[].cols
@@ -320,11 +321,11 @@ def _search_cached(
     var host_ptr = host_c.unsafe_ptr().as_unsafe_any_origin()
     for row in range(M):
         _topk_row(
-            host_ptr + row * N,
+            host_ptr.unsafe_offset(row * N),
             N,
             k,
-            out_scores + row * k,
-            out_idx + row * k,
+            out_scores.unsafe_offset(row * k),
+            out_idx.unsafe_offset(row * k),
         )
 
 
@@ -362,8 +363,8 @@ def search_handle_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         if k <= 0:
             raise Error("searchHandle: k must be > 0")
 
-        var idx_ptr = idx_ta.data_ptr(b, env).bitcast[UInt32]()
-        var scores_ptr = scores_ta.data_ptr(b, env).bitcast[Float32]()
+        var idx_ptr = idx_ta.data_ptr(b, env).unsafe_bitcast[UInt32]()
+        var scores_ptr = scores_ta.data_ptr(b, env).unsafe_bitcast[Float32]()
 
         var state = _get_gpu_state(b, env)
         _search_cached(state[].ctx, a, b_mat, k, idx_ptr, scores_ptr)
@@ -410,13 +411,13 @@ struct MatmulAsyncData(Movable):
     @__allow_legacy_any_origin_fields
     var dst_ref: NapiRef
     @__allow_legacy_any_origin_fields
-    var a_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin]
+    var a_ptr: Pointer[CachedMatrix, MutAnyOrigin]
     @__allow_legacy_any_origin_fields
-    var b_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin]
+    var b_ptr: Pointer[CachedMatrix, MutAnyOrigin]
     @__allow_legacy_any_origin_fields
-    var dst_ptr: UnsafePointer[Byte, MutAnyOrigin]
+    var dst_ptr: Pointer[Byte, MutAnyOrigin]
     @__allow_legacy_any_origin_fields
-    var state_ptr: UnsafePointer[GpuState, MutAnyOrigin]
+    var state_ptr: Pointer[GpuState, MutAnyOrigin]
     var had_error: Bool
 
     def __init__(
@@ -424,10 +425,10 @@ struct MatmulAsyncData(Movable):
         a_ref: NapiRef,
         b_ref: NapiRef,
         dst_ref: NapiRef,
-        a_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin],
-        b_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin],
-        dst_ptr: UnsafePointer[Byte, MutAnyOrigin],
-        state_ptr: UnsafePointer[GpuState, MutAnyOrigin],
+        a_ptr: Pointer[CachedMatrix, MutAnyOrigin],
+        b_ptr: Pointer[CachedMatrix, MutAnyOrigin],
+        dst_ptr: Pointer[Byte, MutAnyOrigin],
+        state_ptr: Pointer[GpuState, MutAnyOrigin],
     ):
         self.deferred = NapiDeferred(unsafe_from_address=Int(0))
         self.work = NapiAsyncWork(unsafe_from_address=Int(0))
@@ -454,7 +455,7 @@ struct MatmulAsyncData(Movable):
 
 
 def matmul_async_execute(env: NapiEnv, data: OpaquePointer[MutAnyOrigin]):
-    var ptr = data.bitcast[MatmulAsyncData]()
+    var ptr = data.unsafe_bitcast[MatmulAsyncData]()
     try:
         _matmul_cached(
             ptr[].state_ptr[].ctx,
@@ -469,7 +470,7 @@ def matmul_async_execute(env: NapiEnv, data: OpaquePointer[MutAnyOrigin]):
 def matmul_async_complete(
     env: NapiEnv, status: NapiStatus, data: OpaquePointer[MutAnyOrigin]
 ):
-    var ptr = data.bitcast[MatmulAsyncData]()
+    var ptr = data.unsafe_bitcast[MatmulAsyncData]()
     try:
         JsRef(ptr[].a_ref).delete(env)
     except:
@@ -495,7 +496,7 @@ def matmul_async_complete(
     except:
         pass
     ptr.unsafe_deinit_pointee()
-    ptr.free()
+    ptr.unsafe_free()
 
 
 def matmul_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -533,7 +534,7 @@ def matmul_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var b_ref = JsRef.create(b, env, args[1], UInt32(1)).handle
         var dst_ref = JsRef.create(b, env, args[2], UInt32(1)).handle
 
-        var data_ptr = alloc[MatmulAsyncData](1)
+        var data_ptr = unsafe_alloc[MatmulAsyncData](1)
         data_ptr.unsafe_write(
             MatmulAsyncData(
                 a_ref, b_ref, dst_ref, a_ptr, b_ptr, dst_raw, state
@@ -546,7 +547,7 @@ def matmul_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
             b,
             env,
             "matmulHandleAsync",
-            data_ptr.bitcast[NoneType]().as_unsafe_any_origin(),
+            data_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin(),
             fn_ptr(exec_ref),
             fn_ptr(comp_ref),
         )
@@ -573,15 +574,15 @@ struct SearchAsyncData(Movable):
     @__allow_legacy_any_origin_fields
     var scores_ref: NapiRef
     @__allow_legacy_any_origin_fields
-    var a_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin]
+    var a_ptr: Pointer[CachedMatrix, MutAnyOrigin]
     @__allow_legacy_any_origin_fields
-    var b_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin]
+    var b_ptr: Pointer[CachedMatrix, MutAnyOrigin]
     @__allow_legacy_any_origin_fields
-    var idx_ptr: UnsafePointer[UInt32, MutAnyOrigin]
+    var idx_ptr: Pointer[UInt32, MutAnyOrigin]
     @__allow_legacy_any_origin_fields
-    var scores_ptr: UnsafePointer[Float32, MutAnyOrigin]
+    var scores_ptr: Pointer[Float32, MutAnyOrigin]
     @__allow_legacy_any_origin_fields
-    var state_ptr: UnsafePointer[GpuState, MutAnyOrigin]
+    var state_ptr: Pointer[GpuState, MutAnyOrigin]
     var k: Int
     var had_error: Bool
 
@@ -591,11 +592,11 @@ struct SearchAsyncData(Movable):
         b_ref: NapiRef,
         idx_ref: NapiRef,
         scores_ref: NapiRef,
-        a_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin],
-        b_ptr: UnsafePointer[CachedMatrix, MutAnyOrigin],
-        idx_ptr: UnsafePointer[UInt32, MutAnyOrigin],
-        scores_ptr: UnsafePointer[Float32, MutAnyOrigin],
-        state_ptr: UnsafePointer[GpuState, MutAnyOrigin],
+        a_ptr: Pointer[CachedMatrix, MutAnyOrigin],
+        b_ptr: Pointer[CachedMatrix, MutAnyOrigin],
+        idx_ptr: Pointer[UInt32, MutAnyOrigin],
+        scores_ptr: Pointer[Float32, MutAnyOrigin],
+        state_ptr: Pointer[GpuState, MutAnyOrigin],
         k: Int,
     ):
         self.deferred = NapiDeferred(unsafe_from_address=Int(0))
@@ -629,7 +630,7 @@ struct SearchAsyncData(Movable):
 
 
 def search_async_execute(env: NapiEnv, data: OpaquePointer[MutAnyOrigin]):
-    var ptr = data.bitcast[SearchAsyncData]()
+    var ptr = data.unsafe_bitcast[SearchAsyncData]()
     try:
         _search_cached(
             ptr[].state_ptr[].ctx,
@@ -646,7 +647,7 @@ def search_async_execute(env: NapiEnv, data: OpaquePointer[MutAnyOrigin]):
 def search_async_complete(
     env: NapiEnv, status: NapiStatus, data: OpaquePointer[MutAnyOrigin]
 ):
-    var ptr = data.bitcast[SearchAsyncData]()
+    var ptr = data.unsafe_bitcast[SearchAsyncData]()
     try:
         JsRef(ptr[].a_ref).delete(env)
     except:
@@ -676,7 +677,7 @@ def search_async_complete(
     except:
         pass
     ptr.unsafe_deinit_pointee()
-    ptr.free()
+    ptr.unsafe_free()
 
 
 def search_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -720,8 +721,8 @@ def search_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         if k <= 0:
             raise Error("searchHandleAsync: k must be > 0")
 
-        var idx_raw = idx_ta.data_ptr(b, env).bitcast[UInt32]()
-        var scores_raw = scores_ta.data_ptr(b, env).bitcast[Float32]()
+        var idx_raw = idx_ta.data_ptr(b, env).unsafe_bitcast[UInt32]()
+        var scores_raw = scores_ta.data_ptr(b, env).unsafe_bitcast[Float32]()
 
         var state = _get_gpu_state(b, env)
 
@@ -730,7 +731,7 @@ def search_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var idx_ref = JsRef.create(b, env, args[2], UInt32(1)).handle
         var scores_ref = JsRef.create(b, env, args[3], UInt32(1)).handle
 
-        var data_ptr = alloc[SearchAsyncData](1)
+        var data_ptr = unsafe_alloc[SearchAsyncData](1)
         data_ptr.unsafe_write(
             SearchAsyncData(
                 a_ref,
@@ -752,7 +753,7 @@ def search_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
             b,
             env,
             "searchHandleAsync",
-            data_ptr.bitcast[NoneType]().as_unsafe_any_origin(),
+            data_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin(),
             fn_ptr(exec_ref),
             fn_ptr(comp_ref),
         )

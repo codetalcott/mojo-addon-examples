@@ -1,4 +1,4 @@
-## Tier 2 — GPU via std.gpu.host only: hand-rolled kernel, raw UnsafePointer
+## Tier 2 — GPU via std.gpu.host only: hand-rolled kernel, raw Pointer
 ## kernel args, no `layout`, no `linalg`. Mirrors the pattern in
 ## examples/image/addon.mojo's _gpu_kernel_grayscale.
 ##
@@ -8,7 +8,7 @@
 ## license) rather than MAX-restricted.
 
 from std.gpu import global_idx
-from std.gpu.host import DeviceContext
+from max.gpu.host import DeviceContext
 from std.math import ceildiv
 from std.sys import has_accelerator
 
@@ -17,17 +17,20 @@ comptime BLOCK = 256
 
 
 def _double_kernel(
-    src: UnsafePointer[Float32, MutAnyOrigin],
-    dst: UnsafePointer[Float32, MutAnyOrigin],
-    n: Int,
+    src: Pointer[Float32, MutAnyOrigin],
+    dst: Pointer[Float32, MutAnyOrigin],
+    n_i64: Int64,
 ):
+    # Int/UInt are not DevicePassable as of Mojo 26.6 — kernel params must
+    # be fixed-width. Convert back to Int for indexing.
+    var n = Int(n_i64)
     var tid = Int(global_idx.x)
     if tid < n:
-        dst[tid] = src[tid] * 2.0
+        dst[unsafe_offset=tid] = src[unsafe_offset=tid] * 2.0
 
 
-@export("spike_tier2_gpu_double", ABI="C")
-def gpu_double(n: Int) -> Float32:
+@export("spike_tier2_gpu_double")
+def gpu_double(n: Int) abi("C") -> Float32:
     comptime if not has_accelerator():
         return -1.0
 
@@ -41,7 +44,7 @@ def gpu_double(n: Int) -> Float32:
         ctx.enqueue_function[_double_kernel, _double_kernel](
             dev_src.unsafe_ptr(),
             dev_dst.unsafe_ptr(),
-            n,
+            Int64(n),
             grid_dim=grid,
             block_dim=BLOCK,
         )

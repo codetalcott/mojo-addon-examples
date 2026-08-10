@@ -15,9 +15,10 @@
 ## Build: pixi run bash image/build_cached.sh
 
 from std.math import ceildiv
-from std.memory import alloc, unsafe_memcpy
+from std.memory import unsafe_memcpy
+from std.memory.alloc import unsafe_alloc
 from std.gpu import global_idx
-from std.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
+from max.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error
@@ -48,7 +49,7 @@ struct GpuState(Movable):
 
 def _get_gpu_state(
     b: Bindings, env: NapiEnv
-) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
+) raises -> Pointer[GpuState, MutAnyOrigin]:
     try:
         return get_instance_data[GpuState](b, env)
     except:
@@ -94,27 +95,30 @@ struct CachedImage(Movable):
 # Fixed-point luma: (77*R + 150*G + 29*B) >> 8. Alpha preserved.
 
 def _gpu_kernel_grayscale(
-    src: UnsafePointer[UInt32, MutAnyOrigin],
-    dst: UnsafePointer[UInt32, MutAnyOrigin],
-    num_pixels: Int,
+    src: Pointer[UInt32, MutAnyOrigin],
+    dst: Pointer[UInt32, MutAnyOrigin],
+    num_pixels_i64: Int64,
 ):
+    # Int/UInt are not DevicePassable as of Mojo 26.6 — kernel params must
+    # be fixed-width. Convert back to Int for indexing.
+    var num_pixels = Int(num_pixels_i64)
     var tid = Int(global_idx.x)
     if tid >= num_pixels:
         return
-    var pixel = src[tid]
+    var pixel = src[unsafe_offset=tid]
     var r = pixel & 0xFF
     var g = (pixel >> 8) & 0xFF
     var b_ch = (pixel >> 16) & 0xFF
     var a = pixel & 0xFF000000
     var gray = (77 * r + 150 * g + 29 * b_ch) >> 8
-    dst[tid] = gray | (gray << 8) | (gray << 16) | a
+    dst[unsafe_offset=tid] = gray | (gray << 8) | (gray << 16) | a
 
 
 # --- loadImageGpu: one-shot H2D upload into reusable device buffers ---------
 
 def _load_image_gpu(
     ctx: DeviceContext,
-    src_bytes: UnsafePointer[Byte, MutAnyOrigin],
+    src_bytes: Pointer[Byte, MutAnyOrigin],
     num_pixels: Int,
 ) raises -> CachedImage:
     var num_bytes = num_pixels * 4
@@ -125,7 +129,7 @@ def _load_image_gpu(
     # Ephemeral pinned staging buffer — dropped on return.
     var staging = ctx.enqueue_create_host_buffer[DType.uint32](num_pixels)
     unsafe_memcpy(
-        dest=staging.unsafe_ptr().bitcast[Byte](),
+        dest=staging.unsafe_ptr().unsafe_bitcast[Byte](),
         src=src_bytes,
         count=num_bytes,
     )
@@ -163,14 +167,14 @@ def load_image_gpu_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 
 def _grayscale_cached(
     ctx: DeviceContext,
-    ci: UnsafePointer[CachedImage, MutAnyOrigin],
-    dst_bytes: UnsafePointer[Byte, MutAnyOrigin],
+    ci: Pointer[CachedImage, MutAnyOrigin],
+    dst_bytes: Pointer[Byte, MutAnyOrigin],
 ) raises:
     var grid = ceildiv(ci[].num_pixels, GPU_BLOCK)
     ctx.enqueue_function[_gpu_kernel_grayscale](
         ci[].src.unsafe_ptr(),
         ci[].dst.unsafe_ptr(),
-        ci[].num_pixels,
+        Int64(ci[].num_pixels),
         grid_dim=grid,
         block_dim=GPU_BLOCK,
     )
@@ -179,7 +183,7 @@ def _grayscale_cached(
 
     unsafe_memcpy(
         dest=dst_bytes,
-        src=ci[].host_dst.unsafe_ptr().bitcast[Byte](),
+        src=ci[].host_dst.unsafe_ptr().unsafe_bitcast[Byte](),
         count=ci[].num_bytes,
     )
 
@@ -233,15 +237,15 @@ def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     except:
         pass
 
-    var bindings_ptr = alloc[NapiBindings](1)
+    var bindings_ptr = unsafe_alloc[NapiBindings](1)
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
         bindings_ptr.unsafe_write(bindings^)
     except:
-        bindings_ptr.free()
+        bindings_ptr.unsafe_free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
+    var cb_data = bindings_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin()
 
     # Cache a DeviceContext if a GPU is available.
     try:

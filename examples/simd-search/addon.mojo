@@ -11,10 +11,12 @@
 from std.algorithm.functional import vectorize
 from std.sys import simd_width_of
 from std.math import ceildiv
-from std.memory import alloc, unsafe_memcpy, stack_allocation
-from std.gpu import thread_idx, block_idx, barrier
-from std.gpu.memory import AddressSpace
-from std.gpu.host import DeviceContext
+from std.memory import unsafe_memcpy, stack_allocation
+from std.memory.alloc import unsafe_alloc
+from std.gpu import thread_idx, block_idx
+from max.gpu import barrier
+from std.memory import AddressSpace
+from max.gpu.host import DeviceContext
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error, check_status
@@ -49,24 +51,24 @@ def _gpu_state_finalize(
     data: OpaquePointer[MutAnyOrigin],
     hint: OpaquePointer[MutAnyOrigin],
 ):
-    var ptr = data.bitcast[GpuState]()
+    var ptr = data.unsafe_bitcast[GpuState]()
     ptr.unsafe_deinit_pointee()
-    ptr.free()
+    ptr.unsafe_free()
 
 
 def _get_gpu_state(
     b: Bindings, env: NapiEnv
-) raises -> UnsafePointer[GpuState, MutAnyOrigin]:
+) raises -> Pointer[GpuState, MutAnyOrigin]:
     var data = OpaquePointer[MutAnyOrigin](unsafe_from_address=Int(0))
-    _ = raw_get_instance_data(b, env, UnsafePointer(to=data).bitcast[NoneType]().as_unsafe_any_origin())
+    _ = raw_get_instance_data(b, env, Pointer(to=data).unsafe_bitcast[NoneType]().as_unsafe_any_origin())
     if Int(data) == 0:
         raise Error("countByteGpu requires a GPU (no accelerator found)")
-    return data.bitcast[GpuState]()
+    return data.unsafe_bitcast[GpuState]()
 
 
 # --- Helper: get byte pointer + length from Buffer or Uint8Array -------------
 
-def _get_data_ptr(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UnsafePointer[Byte, MutAnyOrigin]:
+def _get_data_ptr(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Pointer[Byte, MutAnyOrigin]:
     if JsBuffer.is_buffer(b, env, val):
         return JsBuffer(val).data_ptr(b, env)
     if JsTypedArray.is_typedarray(b, env, val):
@@ -107,7 +109,7 @@ comptime PARALLEL_THRESHOLD = 65536  # 64KB
 comptime NUM_WORKERS = 4
 
 def _count_byte_range(
-    data: UnsafePointer[Byte, MutAnyOrigin],
+    data: Pointer[Byte, MutAnyOrigin],
     target: Byte,
     start: Int,
     end: Int,
@@ -115,20 +117,20 @@ def _count_byte_range(
     var count: Int = 0
     var base = start
     def compute[width: Int](offset: Int) {mut count, imm data, imm base, imm target}:
-        var chunk = data.load[width=width](base + offset)
+        var chunk = data.unsafe_load[width=width](base + offset)
         count += _simd_count_matches(chunk, target)
     vectorize[simd_width_of[DType.uint8]()](end - start, compute)
     return count
 
 
 def _count_byte(
-    data: UnsafePointer[Byte, MutAnyOrigin],
+    data: Pointer[Byte, MutAnyOrigin],
     target: Byte,
     size: Int,
 ) -> Int:
     if size < PARALLEL_THRESHOLD:
         return _count_byte_range(data, target, 0, size)
-    var partials = alloc[Int](NUM_WORKERS)
+    var partials = unsafe_alloc[Int](NUM_WORKERS)
     def worker(wid: Int) capturing:
         # NOTE: derived inside the worker, not captured. Capturing a post-computed
         # scalar local in a parallelize closure miscompiles on Linux x86_64
@@ -138,12 +140,12 @@ def _count_byte(
         var chunk_size = size // NUM_WORKERS
         var s = wid * chunk_size
         var e = s + chunk_size if wid < NUM_WORKERS - 1 else size
-        partials[wid] = _count_byte_range(data, target, s, e)
+        partials[unsafe_offset=wid] = _count_byte_range(data, target, s, e)
     parallelize_safe[worker](NUM_WORKERS)
     var total: Int = 0
     for i in range(NUM_WORKERS):
-        total += partials[i]
-    partials.free()
+        total += partials[unsafe_offset=i]
+    partials.unsafe_free()
     return total
 
 
@@ -153,11 +155,14 @@ def _count_byte(
 # Pure integer; Metal-safe.
 
 def _gpu_kernel_count_byte(
-    data: UnsafePointer[Byte, MutAnyOrigin],
-    partial: UnsafePointer[UInt32, MutAnyOrigin],
+    data: Pointer[Byte, MutAnyOrigin],
+    partial: Pointer[UInt32, MutAnyOrigin],
     target: UInt32,
-    size: Int,
+    size_i64: Int64,
 ):
+    # Int/UInt are not DevicePassable as of Mojo 26.6 — kernel params must
+    # be fixed-width. Convert back to Int for indexing.
+    var size = Int(size_i64)
     var s_count = stack_allocation[
         GPU_BLOCK, Scalar[DType.uint32], address_space=AddressSpace.SHARED
     ]()
@@ -170,26 +175,26 @@ def _gpu_kernel_count_byte(
     for i in range(GPU_ELEMS_PER_THREAD):
         var idx = base + i * GPU_BLOCK
         if idx < size:
-            if UInt32(data[idx]) == target:
+            if UInt32(data[unsafe_offset=idx]) == target:
                 local += 1
 
-    s_count[tid] = local
+    s_count[unsafe_offset=tid] = local
     barrier()
 
     var step = GPU_BLOCK // 2
     while step > 0:
         if tid < step:
-            s_count[tid] = s_count[tid] + s_count[tid + step]
+            s_count[unsafe_offset=tid] = s_count[unsafe_offset=tid] + s_count[unsafe_offset=tid + step]
         barrier()
         step //= 2
 
     if tid == 0:
-        partial[bid] = s_count[0]
+        partial[unsafe_offset=bid] = s_count[unsafe_offset=0]
 
 
 def _count_byte_gpu(
     ctx: DeviceContext,
-    data: UnsafePointer[Byte, MutAnyOrigin],
+    data: Pointer[Byte, MutAnyOrigin],
     target: Byte,
     size: Int,
 ) raises -> Int:
@@ -206,7 +211,7 @@ def _count_byte_gpu(
         dev_data.unsafe_ptr(),
         dev_partial.unsafe_ptr(),
         UInt32(target),
-        size,
+        Int64(size),
         grid_dim=num_blocks,
         block_dim=GPU_BLOCK,
     )
@@ -218,34 +223,34 @@ def _count_byte_gpu(
     var ptr = host_partial.unsafe_ptr()
     var total: Int = 0
     for i in range(num_blocks):
-        total += Int(ptr[i])
+        total += Int(ptr[unsafe_offset=i])
     return total
 
 
 # --- SIMD position collection ------------------------------------------------
 
 def _collect_byte_positions(
-    data: UnsafePointer[Byte, MutAnyOrigin],
+    data: Pointer[Byte, MutAnyOrigin],
     target: Byte,
     size: Int,
-    result: UnsafePointer[UInt32, MutAnyOrigin],
+    result: Pointer[UInt32, MutAnyOrigin],
 ) -> Int:
     var idx: Int = 0
     comptime sw = simd_width_of[DType.uint8]()
     var full_chunks = size // sw
     for chunk_i in range(full_chunks):
         var offset = chunk_i * sw
-        var chunk = data.load[width=sw](offset)
+        var chunk = data.unsafe_load[width=sw](offset)
         var xored = chunk ^ SIMD[DType.uint8, sw](target)
         for lane in range(sw):
             if xored[lane] == 0:
-                result[idx] = UInt32(offset + lane)
+                result[unsafe_offset=idx] = UInt32(offset + lane)
                 idx += 1
     # Scalar tail
     var tail_start = full_chunks * sw
     for i in range(tail_start, size):
-        if data[i] == target:
-            result[idx] = UInt32(i)
+        if data[unsafe_offset=i] == target:
+            result[unsafe_offset=idx] = UInt32(i)
             idx += 1
     return idx
 
@@ -263,23 +268,23 @@ def _collect_byte_positions(
 # expensive byte-by-byte comparison on the rare candidates that pass the filter.
 
 def _count_multi_byte(
-    data: UnsafePointer[Byte, MutAnyOrigin],
-    needle: UnsafePointer[Byte, MutAnyOrigin],
+    data: Pointer[Byte, MutAnyOrigin],
+    needle: Pointer[Byte, MutAnyOrigin],
     data_len: Int,
     needle_len: Int,
 ) -> Int:
     if needle_len == 0 or needle_len > data_len:
         return 0
-    var first = needle[0]
-    var last = needle[needle_len - 1]
+    var first = needle[unsafe_offset=0]
+    var last = needle[unsafe_offset=needle_len - 1]
     var search_len = data_len - needle_len + 1
     var count: Int = 0
     comptime sw = simd_width_of[DType.uint8]()
     var full_chunks = search_len // sw
     for chunk_i in range(full_chunks):
         var offset = chunk_i * sw
-        var first_xor = data.load[width=sw](offset) ^ SIMD[DType.uint8, sw](first)
-        var last_xor = data.load[width=sw](offset + needle_len - 1) ^ SIMD[DType.uint8, sw](last)
+        var first_xor = data.unsafe_load[width=sw](offset) ^ SIMD[DType.uint8, sw](first)
+        var last_xor = data.unsafe_load[width=sw](offset + needle_len - 1) ^ SIMD[DType.uint8, sw](last)
         # candidate where both XOR == 0 (both first and last byte match)
         var combined = first_xor | last_xor  # 0 only where both match
         for lane in range(sw):
@@ -287,7 +292,7 @@ def _count_multi_byte(
                 var pos = offset + lane
                 var found = True
                 for k in range(1, needle_len - 1):
-                    if data[pos + k] != needle[k]:
+                    if data[unsafe_offset=pos + k] != needle[unsafe_offset=k]:
                         found = False
                         break
                 if found:
@@ -297,7 +302,7 @@ def _count_multi_byte(
     for i in range(tail_start, search_len):
         var found = True
         for k in range(needle_len):
-            if data[i + k] != needle[k]:
+            if data[unsafe_offset=i + k] != needle[unsafe_offset=k]:
                 found = False
                 break
         if found:
@@ -306,46 +311,46 @@ def _count_multi_byte(
 
 
 def _collect_multi_byte(
-    data: UnsafePointer[Byte, MutAnyOrigin],
-    needle: UnsafePointer[Byte, MutAnyOrigin],
+    data: Pointer[Byte, MutAnyOrigin],
+    needle: Pointer[Byte, MutAnyOrigin],
     data_len: Int,
     needle_len: Int,
-    result: UnsafePointer[UInt32, MutAnyOrigin],
+    result: Pointer[UInt32, MutAnyOrigin],
 ) -> Int:
     if needle_len == 0 or needle_len > data_len:
         return 0
-    var first = needle[0]
-    var last = needle[needle_len - 1]
+    var first = needle[unsafe_offset=0]
+    var last = needle[unsafe_offset=needle_len - 1]
     var search_len = data_len - needle_len + 1
     var idx: Int = 0
     comptime sw = simd_width_of[DType.uint8]()
     var full_chunks = search_len // sw
     for chunk_i in range(full_chunks):
         var offset = chunk_i * sw
-        var first_xor = data.load[width=sw](offset) ^ SIMD[DType.uint8, sw](first)
-        var last_xor = data.load[width=sw](offset + needle_len - 1) ^ SIMD[DType.uint8, sw](last)
+        var first_xor = data.unsafe_load[width=sw](offset) ^ SIMD[DType.uint8, sw](first)
+        var last_xor = data.unsafe_load[width=sw](offset + needle_len - 1) ^ SIMD[DType.uint8, sw](last)
         var combined = first_xor | last_xor
         for lane in range(sw):
             if combined[lane] == 0:
                 var pos = offset + lane
                 var found = True
                 for k in range(1, needle_len - 1):
-                    if data[pos + k] != needle[k]:
+                    if data[unsafe_offset=pos + k] != needle[unsafe_offset=k]:
                         found = False
                         break
                 if found:
-                    result[idx] = UInt32(pos)
+                    result[unsafe_offset=idx] = UInt32(pos)
                     idx += 1
     # Scalar tail
     var tail_start = full_chunks * sw
     for i in range(tail_start, search_len):
         var found = True
         for k in range(needle_len):
-            if data[i + k] != needle[k]:
+            if data[unsafe_offset=i + k] != needle[unsafe_offset=k]:
                 found = False
                 break
         if found:
-            result[idx] = UInt32(i)
+            result[unsafe_offset=idx] = UInt32(i)
             idx += 1
     return idx
 
@@ -406,7 +411,7 @@ def search_all_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         # Count matches first to allocate exact-size result
         var match_count: Int
         if n_len == 1:
-            match_count = _count_byte(h_ptr, n_ptr[0], h_len)
+            match_count = _count_byte(h_ptr, n_ptr[unsafe_offset=0], h_len)
         else:
             match_count = _count_multi_byte(h_ptr, n_ptr, h_len, n_len)
 
@@ -414,9 +419,9 @@ def search_all_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var byte_len = UInt(match_count * 4) if match_count > 0 else UInt(0)
         var ab = JsArrayBuffer.create(b, env, byte_len)
         if match_count > 0:
-            var ab_ptr = ab.data_ptr(b, env).bitcast[UInt32]()
+            var ab_ptr = ab.data_ptr(b, env).unsafe_bitcast[UInt32]()
             if n_len == 1:
-                _ = _collect_byte_positions(h_ptr, n_ptr[0], h_len, ab_ptr)
+                _ = _collect_byte_positions(h_ptr, n_ptr[unsafe_offset=0], h_len, ab_ptr)
             else:
                 _ = _collect_multi_byte(h_ptr, n_ptr, h_len, n_len, ab_ptr)
 
@@ -435,29 +440,29 @@ def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     except:
         pass
 
-    var bindings_ptr = alloc[NapiBindings](1)
+    var bindings_ptr = unsafe_alloc[NapiBindings](1)
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
         bindings_ptr.unsafe_write(bindings^)
     except:
-        bindings_ptr.free()
+        bindings_ptr.unsafe_free()
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]().as_unsafe_any_origin()
+    var cb_data = bindings_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin()
 
     # Cache a DeviceContext if a GPU is available.
     try:
         var ctx = DeviceContext()
-        var state_ptr = alloc[GpuState](1)
+        var state_ptr = unsafe_alloc[GpuState](1)
         state_ptr.unsafe_write(GpuState(ctx^))
         var fin_ref = _gpu_state_finalize
-        var fin_ptr = UnsafePointer(to=fin_ref).bitcast[
+        var fin_ptr = Pointer(to=fin_ref).unsafe_bitcast[
             OpaquePointer[MutAnyOrigin]
         ]()[]
         _ = raw_set_instance_data(
             bindings_ptr.as_unsafe_any_origin(),
             env,
-            state_ptr.bitcast[NoneType]().as_unsafe_any_origin(),
+            state_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin(),
             fin_ptr,
             OpaquePointer[MutAnyOrigin](unsafe_from_address=Int(0)),
         )

@@ -8,7 +8,7 @@
 ## embed.py as a module-level singleton — subsequent N-API calls reuse the
 ## compiled MAX graph (cold-start cost amortized over the session).
 
-from std.memory import alloc
+from std.memory.alloc import unsafe_alloc
 from std.python import Python, PythonObject
 
 from napi.types import (
@@ -47,7 +47,7 @@ def embed_tokens_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var b = CbArgs.get_bindings(env, info)
         # napi-mojo's CbArgs tops out at get_four; use get_argv for 5 args.
-        var argv = alloc[NapiValue](5)
+        var argv = unsafe_alloc[NapiValue](5)
         CbArgs.get_argv(b, env, info, 5, argv.as_unsafe_any_origin())
 
         # argv[0]: Int32Array of token IDs, shape [batch, seqLen]
@@ -55,12 +55,12 @@ def embed_tokens_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         # argv[2]: Int (batch)
         # argv[3]: Int (seqLen)
         # argv[4]: Float32Array dst, shape [batch, EMBED_DIM]
-        var ids_ta = JsTypedArray(argv[0])
-        var mask_ta = JsTypedArray(argv[1])
-        var batch = Int(JsInt32.from_napi_value(b, env, argv[2]))
-        var seq_len = Int(JsInt32.from_napi_value(b, env, argv[3]))
-        var dst_ta = JsTypedArray(argv[4])
-        argv.free()
+        var ids_ta = JsTypedArray(argv[unsafe_offset=0])
+        var mask_ta = JsTypedArray(argv[unsafe_offset=1])
+        var batch = Int(JsInt32.from_napi_value(b, env, argv[unsafe_offset=2]))
+        var seq_len = Int(JsInt32.from_napi_value(b, env, argv[unsafe_offset=3]))
+        var dst_ta = JsTypedArray(argv[unsafe_offset=4])
+        argv.unsafe_free()
 
         # Dimension validation — cheap safety net, catches wrong sizes early.
         var ids_len = Int(ids_ta.length(b, env))
@@ -173,7 +173,7 @@ struct EmbedAsyncData(Movable):
 
 
 def embed_async_execute(env: NapiEnv, data: OpaquePointer[MutAnyOrigin]):
-    var ptr = data.bitcast[EmbedAsyncData]()
+    var ptr = data.unsafe_bitcast[EmbedAsyncData]()
     try:
         var embed = _import_embed_module()
         _ = embed.embed_batch_from_addrs(
@@ -191,7 +191,7 @@ def embed_async_execute(env: NapiEnv, data: OpaquePointer[MutAnyOrigin]):
 def embed_async_complete(
     env: NapiEnv, status: NapiStatus, data: OpaquePointer[MutAnyOrigin]
 ):
-    var ptr = data.bitcast[EmbedAsyncData]()
+    var ptr = data.unsafe_bitcast[EmbedAsyncData]()
     try:
         JsRef(ptr[].ids_ref).delete(env)
     except:
@@ -220,20 +220,20 @@ def embed_async_complete(
     except:
         pass
     ptr.unsafe_deinit_pointee()
-    ptr.free()
+    ptr.unsafe_free()
 
 
 def embed_tokens_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var b = CbArgs.get_bindings(env, info)
-        var argv = alloc[NapiValue](5)
+        var argv = unsafe_alloc[NapiValue](5)
         CbArgs.get_argv(b, env, info, 5, argv.as_unsafe_any_origin())
 
-        var ids_ta = JsTypedArray(argv[0])
-        var mask_ta = JsTypedArray(argv[1])
-        var batch = Int(JsInt32.from_napi_value(b, env, argv[2]))
-        var seq_len = Int(JsInt32.from_napi_value(b, env, argv[3]))
-        var dst_ta = JsTypedArray(argv[4])
+        var ids_ta = JsTypedArray(argv[unsafe_offset=0])
+        var mask_ta = JsTypedArray(argv[unsafe_offset=1])
+        var batch = Int(JsInt32.from_napi_value(b, env, argv[unsafe_offset=2]))
+        var seq_len = Int(JsInt32.from_napi_value(b, env, argv[unsafe_offset=3]))
+        var dst_ta = JsTypedArray(argv[unsafe_offset=4])
 
         var ids_len = Int(ids_ta.length(b, env))
         var mask_len = Int(mask_ta.length(b, env))
@@ -241,25 +241,25 @@ def embed_tokens_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var expected_tokens = batch * seq_len
         var expected_dst = batch * EMBED_DIM
         if ids_len < expected_tokens:
-            argv.free()
+            argv.unsafe_free()
             raise Error("embedTokensAsync: tokenIds too small")
         if mask_len < expected_tokens:
-            argv.free()
+            argv.unsafe_free()
             raise Error("embedTokensAsync: attentionMask too small")
         if dst_len < expected_dst:
-            argv.free()
+            argv.unsafe_free()
             raise Error("embedTokensAsync: dst too small")
 
         var ids_addr = Int(ids_ta.data_ptr(b, env))
         var mask_addr = Int(mask_ta.data_ptr(b, env))
         var dst_addr = Int(dst_ta.data_ptr(b, env))
 
-        var ids_ref = JsRef.create(b, env, argv[0], UInt32(1)).handle
-        var mask_ref = JsRef.create(b, env, argv[1], UInt32(1)).handle
-        var dst_ref = JsRef.create(b, env, argv[4], UInt32(1)).handle
-        argv.free()
+        var ids_ref = JsRef.create(b, env, argv[unsafe_offset=0], UInt32(1)).handle
+        var mask_ref = JsRef.create(b, env, argv[unsafe_offset=1], UInt32(1)).handle
+        var dst_ref = JsRef.create(b, env, argv[unsafe_offset=4], UInt32(1)).handle
+        argv.unsafe_free()
 
-        var data_ptr = alloc[EmbedAsyncData](1)
+        var data_ptr = unsafe_alloc[EmbedAsyncData](1)
         data_ptr.unsafe_write(
             EmbedAsyncData(
                 ids_ref,
@@ -279,7 +279,7 @@ def embed_tokens_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
             b,
             env,
             "embedTokensAsync",
-            data_ptr.bitcast[NoneType]().as_unsafe_any_origin(),
+            data_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin(),
             fn_ptr(exec_ref),
             fn_ptr(comp_ref),
         )

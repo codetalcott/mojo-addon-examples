@@ -1,12 +1,12 @@
 ## Tier 3 — GPU + `layout` package (TileTensor), still no `linalg`.
 ##
 ## Adds the `layout` package on top of std.gpu.host. Same kernel functionally,
-## but uses TileTensor wrappers instead of raw UnsafePointer args. Tests the
+## but uses TileTensor wrappers instead of raw Pointer args. Tests the
 ## marginal cost of `layout` in dynamic dependencies — does the package live
 ## inside the MAX runtime or sit on top of std.gpu?
 
 from std.gpu import global_idx
-from std.gpu.host import DeviceContext
+from max.gpu.host import DeviceContext
 from std.math import ceildiv
 from std.sys import has_accelerator
 from layout import Coord, Idx, TileTensor, TensorLayout, row_major
@@ -18,16 +18,19 @@ comptime BLOCK = 256
 def _double_kernel[Layout: TensorLayout](
     src: TileTensor[DType.float32, Layout, MutAnyOrigin],
     dst: TileTensor[DType.float32, Layout, MutAnyOrigin],
-    n: Int,
+    n_i64: Int64,
 ):
+    # Int/UInt are not DevicePassable as of Mojo 26.6 — kernel params must
+    # be fixed-width. Convert back to Int for indexing.
+    var n = Int(n_i64)
     comptime assert src.flat_rank == 1, "expected 1D tensor"
     var tid = Int(global_idx.x)
     if tid < n:
         dst[tid] = src[tid] * 2.0
 
 
-@export("spike_tier3_gpu_double", ABI="C")
-def gpu_double(n: Int) -> Float32:
+@export("spike_tier3_gpu_double")
+def gpu_double(n: Int) abi("C") -> Float32:
     comptime if not has_accelerator():
         return -1.0
 
@@ -46,7 +49,7 @@ def gpu_double(n: Int) -> Float32:
         ctx.enqueue_function[kernel, kernel](
             t_src,
             t_dst,
-            n,
+            Int64(n),
             grid_dim=grid,
             block_dim=BLOCK,
         )
