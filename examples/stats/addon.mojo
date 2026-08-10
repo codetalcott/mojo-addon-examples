@@ -116,9 +116,9 @@ def _parallel_sum_min_max(
         var s = wid * chunk_size
         var e = s + chunk_size if wid < NUM_WORKERS - 1 else size
         var partial = _simd_sum_min_max(data, s, e)
-        p_sum[unsafe_offset=wid] = partial[unsafe_offset=0]
-        p_min[unsafe_offset=wid] = partial[unsafe_offset=1]
-        p_max[unsafe_offset=wid] = partial[unsafe_offset=2]
+        p_sum[unsafe_offset=wid] = partial[0]
+        p_min[unsafe_offset=wid] = partial[1]
+        p_max[unsafe_offset=wid] = partial[2]
     parallelize_safe[worker](NUM_WORKERS)
     var total_sum: Float64 = 0.0
     var total_min: Float64 = p_min[unsafe_offset=0]
