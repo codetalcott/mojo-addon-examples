@@ -61,7 +61,7 @@ step "build image"         pixi run bash examples/image/build.sh
 step "build image_cached"  pixi run bash examples/image/build_cached.sh
 step "build simd-search"   pixi run bash examples/simd-search/build.sh
 step "build search_cached" pixi run bash examples/simd-search/build_cached.sh
-step "build packages/rag"  pixi run bash packages/rag/build.sh
+step "build packages/retrieve"  pixi run bash packages/retrieve/build.sh
 
 echo
 echo "############ builds — CPU-only ############"
@@ -72,7 +72,7 @@ echo
 echo "############ correctness ############"
 step "npm test"              pixi run npm test
 step "test search_cached"    pixi run node examples/simd-search/test_cached.js
-step "jest packages/rag"     bash -c "cd packages/rag && pixi run --manifest-path ../../pixi.toml npm test"
+step "jest packages/retrieve"     bash -c "cd packages/retrieve && pixi run --manifest-path ../../pixi.toml npm test"
 
 echo
 echo "############ parallelize() thread dispatch ############"

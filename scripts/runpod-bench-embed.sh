@@ -2,7 +2,7 @@
 #
 # H100 warm-path bench for @qkstat/embed against real MS-MARCO passages.
 #
-# Builds packages/rag/build/rag.node and packages/embed/build/embed.node,
+# Builds packages/retrieve/build/retrieve.node and packages/embed/build/embed.node,
 # regenerates the MS-MARCO JSONL fixtures (the embed bench needs raw text,
 # not the .bin embeddings used by examples/matmul/matmul_rag.js), then runs
 # packages/embed/bench.js across 6 shapes:
@@ -81,9 +81,9 @@ echo ""                                             >> "$OUTFILE"
 pixi install
 npm install >/dev/null
 
-# --- Build addons (rag first; embed depends on rag at runtime) -----------
-echo "=== BUILD: packages/rag/build/rag.node ==="   >> "$OUTFILE"
-pixi run bash packages/rag/build.sh                 2>&1 | tail -3 >> "$OUTFILE"
+# --- Build addons (retrieve first; embed depends on retrieve at runtime) -----------
+echo "=== BUILD: packages/retrieve/build/retrieve.node ==="   >> "$OUTFILE"
+pixi run bash packages/retrieve/build.sh                 2>&1 | tail -3 >> "$OUTFILE"
 echo ""                                             >> "$OUTFILE"
 echo "=== BUILD: packages/embed/build/embed.node ===" >> "$OUTFILE"
 pixi run bash packages/embed/build.sh               2>&1 | tail -3 >> "$OUTFILE"

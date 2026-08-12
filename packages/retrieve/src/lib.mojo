@@ -1,6 +1,6 @@
-## packages/rag/src/lib.mojo — @qkstat/rag N-API entry point
+## packages/retrieve/src/lib.mojo — @qkstat/retrieve N-API entry point
 ##
-## Compiled into build/rag.node. End users load it via `require('@qkstat/rag')`,
+## Compiled into build/retrieve.node. End users load it via `require('@qkstat/retrieve')`,
 ## which resolves to a platform-specific prebuilt sub-package. Registers the
 ## four RAG primitives: loadMatrixGpu, matmulHandle, searchHandle,
 ## releaseMatrixGpu (see src/linalg.mojo).
@@ -37,7 +37,7 @@ def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
         try:
             var null_code = NapiValue(unsafe_from_address=Int(0))
             var err_msg = JsString.create_literal(
-                env, "@qkstat/rag: register_module failed"
+                env, "@qkstat/retrieve: register_module failed"
             )
             var err_val = NapiValue(unsafe_from_address=Int(0))
             var err_ptr: OpaquePointer[MutAnyOrigin] = Pointer(

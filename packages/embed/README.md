@@ -30,7 +30,7 @@ pixi run bash packages/embed/build.sh              # builds packages/embed/build
 
 ## Use
 
-End-to-end RAG in three lines via the bundled `RagPipeline` (composes embed + [`@qkstat/rag`](../rag) for you):
+End-to-end RAG in three lines via the bundled `RagPipeline` (composes embed + [`@qkstat/retrieve`](../retrieve) for you):
 
 ```js
 const { RagPipeline } = require('@qkstat/embed');
@@ -44,7 +44,7 @@ const hits = await pipe.search('how does auth work', 10);
 pipe.close();
 ```
 
-`RagPipeline` loads both `embed.node` and `rag.node` into the same Node process on separate CUDA contexts. `warmup()` is the right place to absorb the ~30 s MAX graph compile in a long-lived service (MCP daemon, watch-mode reindexer); after that, queries are warm-path.
+`RagPipeline` loads both `embed.node` and `retrieve.node` into the same Node process on separate CUDA contexts. `warmup()` is the right place to absorb the ~30 s MAX graph compile in a long-lived service (MCP daemon, watch-mode reindexer); after that, queries are warm-path.
 
 Just embeddings, no index:
 
@@ -60,7 +60,7 @@ Bring-your-own index (e.g. you already have a `GpuIndex` instance, or you want a
 
 ```js
 const { EmbeddingEngine } = require('@qkstat/embed');
-const { GpuIndex } = require('@qkstat/rag');
+const { GpuIndex } = require('@qkstat/retrieve');
 
 const engine = new EmbeddingEngine();
 const corpusEmb = await engine.embed(docs);

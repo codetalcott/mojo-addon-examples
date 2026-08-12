@@ -1,20 +1,21 @@
 {
-  "name": "@qkstat/rag-darwin-arm64",
+  "name": "@qkstat/retrieve-linux-x64",
   "version": "0.1.0-pre",
-  "description": "Prebuilt @qkstat/rag binary for macOS arm64 (Apple Silicon / Metal).",
-  "main": "rag.node",
+  "description": "Prebuilt @qkstat/retrieve binary for Linux x86_64 (NVIDIA GPU, compute capability >= 8.0 via driver PTX JIT).",
+  "main": "retrieve.node",
   "files": [
-    "rag.node",
+    "retrieve.node",
+    "gpu-libs/",
     "README.md",
     "NOTICE"
   ],
-  "os": ["darwin"],
-  "cpu": ["arm64"],
+  "os": ["linux"],
+  "cpu": ["x64"],
   "engines": { "node": ">=22.12" },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/codetalcott/mojo-addon-examples.git",
-    "directory": "packages/rag/npm/darwin-arm64"
+    "directory": "packages/retrieve/npm/linux-x64"
   },
   "license": "MIT",
   "scripts": {

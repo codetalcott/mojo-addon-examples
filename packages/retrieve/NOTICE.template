@@ -1,4 +1,4 @@
-NOTICE — @qkstat/rag ({PLATFORM})
+NOTICE — @qkstat/retrieve ({PLATFORM})
 =================================
 
 This package includes software from Modular under two licenses.
@@ -18,4 +18,4 @@ License: https://github.com/modular/modular/blob/main/LICENSE
 
 Versions: MAX {MAX_VERSION}, Mojo {MOJO_VERSION}
 (regenerated per release from the installed pixi env —
- see packages/rag/scripts/generate-notice.sh)
+ see packages/retrieve/scripts/generate-notice.sh)

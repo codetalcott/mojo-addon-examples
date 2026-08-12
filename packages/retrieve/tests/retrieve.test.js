@@ -1,6 +1,6 @@
-// @qkstat/rag GPU primitive tests.
+// @qkstat/retrieve GPU primitive tests.
 //
-// Gated on the presence of build/rag.node — hosts without a GPU toolchain
+// Gated on the presence of build/retrieve.node — hosts without a GPU toolchain
 // won't have it (build.sh returns early), and the whole suite skips
 // cleanly so CI on CPU-only runners stays green.
 
@@ -8,7 +8,7 @@ const path = require('path');
 
 let gpu;
 try {
-  gpu = require(path.join(__dirname, '..', 'build', 'rag.node'));
+  gpu = require(path.join(__dirname, '..', 'build', 'retrieve.node'));
 } catch {
   gpu = null;
 }

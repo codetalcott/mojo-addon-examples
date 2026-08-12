@@ -1,14 +1,14 @@
-// packages/rag/tests/async-load.js — concurrency gate G2.
+// packages/retrieve/tests/async-load.js — concurrency gate G2.
 //
 // Fires 100 concurrent searches, samples perf_hooks.monitorEventLoopDelay,
 // asserts p99 jitter < 5 ms. Also runs the same load through the sync path
 // for contrast — the sync version is expected to blow past the threshold
 // because every call blocks the JS thread until the GPU round-trips.
 //
-// Run:  pixi run node packages/rag/tests/async-load.js
+// Run:  pixi run node packages/retrieve/tests/async-load.js
 // Pass: event-loop p99 jitter < 5 ms for the async run
 //
-// Note: this script requires a GPU and a built packages/rag addon. On hosts
+// Note: this script requires a GPU and a built packages/retrieve addon. On hosts
 // without a GPU it will exit with code 2 (skip) rather than fail.
 
 const path = require('path');
