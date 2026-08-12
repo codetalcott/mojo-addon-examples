@@ -21,6 +21,12 @@
     "build:cached": "npm run build:matmul-cached && npm run build:search-cached && npm run build:stats-cached && npm run build:image-cached",
     "build:retrieve": "bash packages/retrieve/build.sh",
     "build:embed": "bash packages/embed/build.sh",
+    "test:matmul-cached": "node examples/matmul/test_cached.js",
+    "test:search-cached": "node examples/simd-search/test_cached.js",
+    "test:stats-cached": "node examples/stats/test_cached.js",
+    "test:image-cached": "node examples/image/test_cached.js",
+    "test:cached": "npm run test:matmul-cached && npm run test:search-cached && npm run test:stats-cached && npm run test:image-cached",
+    "test:retrieve": "cd packages/retrieve && npm test",
     "demo:hash": "node examples/wyhash/hash.js",
     "test": "node examples/matmul/test.js && node examples/simd-search/test.js && node examples/stats/test.js && node examples/image/test.js && node examples/wyhash/test.js"
   },

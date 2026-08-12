@@ -60,9 +60,10 @@ pixi run node packages/embed/bench.js            # MS-MARCO warm-path benchmarks
 # stops at the first failing addon and hides the rest. Use verify-all.sh above
 # to actually verify the repo; `npm test` is the CI smoke subset.
 #
-# CI compiles the cached variants and both packages but does not test them —
-# they are all GPU-execution code and no hosted runner can run it. See
-# "CI coverage" below for where that line is drawn and why.
+# CI compiles the cached variants and both packages, and additionally runs the
+# simd-search/stats/image cached suites on the macOS job. matmul and
+# packages/retrieve are NOT run in CI — the runner's Metal device cannot
+# execute their linalg-backed kernels. See "CI coverage" below.
 npm test
 
 # Run a single example test directly
@@ -95,15 +96,27 @@ On Linux x86_64, builds add `--mcpu haswell` to avoid AVX-512 instructions that 
 
 `.github/workflows/test.yml` runs on `ubuntu-latest` always, plus `macos-latest` on PRs to `main`. The repo is **public**, so standard-runner minutes are free and unmetered — the budget to protect is PR feedback latency, not dollars.
 
-CI **compiles everything** (`build:all`, `build:cached`, `build:retrieve`, `build:embed`) but **tests only `npm test`** — the five CPU-only `test.js` files. That split is a capability limit, not a cost decision:
+CI **compiles everything** (`build:all`, `build:cached`, `build:retrieve`, `build:embed`) on both runners, and additionally **executes three GPU suites on macOS only**, guarded by `if: runner.os == 'macOS'`. What runs where is a capability limit, not a cost decision.
 
-- Every uncovered test is GPU-execution: the four `test_cached.js` suites and `packages/retrieve`'s Jest.
-- `ubuntu-latest` has no NVIDIA GPU, so those cannot run there at all — this half is permanent.
-- `macos-latest` **can** execute Metal. Verified 2026-08-12 by `.github/workflows/metal-probe.yml` (run 31628463546): `examples/simd-search/test_cached.js` passed 220 correctness cases plus a 500-iteration load/release leak-smoke inside the runner VM.
+**`macos-latest` executes Metal, but only partly.** Measured by `.github/workflows/metal-probe.yml`, which runs every suite independently (run 31630265503, 2026-08-12):
 
-So the four `*_cached` suites and `packages/retrieve`'s Jest **could** be promoted onto the macOS job, upgrading it from compile-only to real GPU correctness. Note the asymmetry that would create: `macos-latest` only runs on PRs targeting `main`, so those tests would not gate pushes or the weekly cron, and `ubuntu-latest` can never run them. Re-run the probe (Actions → "Metal GPU probe (manual)") if runner images change and you need to re-confirm.
+| Suite | Kernel style | Runner |
+| --- | --- | --- |
+| `simd-search` | hand-rolled `std.gpu` | pass — 220 cases |
+| `stats` | hand-rolled `std.gpu` | pass — 208 cases |
+| `image` | hand-rolled `std.gpu` | pass — 210 cases |
+| `matmul` | `linalg`/`layout` | **fail** |
+| `packages/retrieve` | `linalg`/`layout` | **fail** |
 
-Until that promotion lands, GPU correctness is gated locally by `scripts/verify-all.sh` and on a pod by `scripts/verify-gpu-h100.sh`. Those remain the authority for NVIDIA paths regardless, since no hosted runner has an NVIDIA GPU.
+The runner's Metal device runs hand-rolled `std.gpu` kernels but not `linalg`-backed ones — tiers 2 vs 3/4 in [`docs/mojo-runtime-isolation-spike-findings.md`](docs/mojo-runtime-isolation-spike-findings.md). `packages/retrieve` shows the split cleanly: `loadMatrixGpu` and every lifecycle/error-path test pass, while all four tests invoking `matmulHandle`/`searchHandle` fail. **Allocation works; computation does not.** Both `matmul` and `retrieve` pass on real NVIDIA, so this is a runner limitation, not a kernel bug.
+
+Re-run the probe (Actions → "Metal GPU probe (manual)") if runner images change. It builds `build:all` **and** `build:cached` on purpose: `stats/test_cached.js` and `image/test_cached.js` load both the one-shot and cached addons, and omitting the former makes them die on `stats.node not found` — which reads as a GPU failure and is not one.
+
+**Two things to keep in mind.** `ubuntu-latest` has no NVIDIA GPU, so it can never run these — permanent. And `macos-latest` runs only on PRs targeting `main`, so the GPU suites gate PRs but **not** pushes to `main` and **not** the weekly cron. A regression arriving by a route that skips the macOS job will not be caught in CI. Treat CI's GPU coverage as a free subset, never as the gate.
+
+Each suite is its own workflow step, never an `&&` chain — chaining lets the first failure hide the rest, which is how an earlier version of this hid three suites behind `matmul`.
+
+The complete gate stays `scripts/verify-all.sh` locally and `scripts/verify-gpu-h100.sh` on a pod. Those are also the only authority for the NVIDIA paths, since no hosted runner has an NVIDIA GPU — CI verifies Metal, production ships CUDA.
 
 Compile-only coverage still earns its place: `packages/retrieve` sat uncompiled from 2026-04-17 to 2026-08-12 and silently missed an entire napi-mojo + Mojo 1.0.0 migration, because nothing in CI ever built it. CI is also the only place the Linux/`sm_90` cross-compile that ships to RunPod is exercised — a Darwin laptop cannot produce that artifact.
 
