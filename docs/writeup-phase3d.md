@@ -69,10 +69,10 @@ Raw captures are in the repo at [`docs/bench-rag-3d-h100-msmarco.txt`](bench-rag
 
 ## The 80-line demo
 
-The interesting code is in [`examples/rag-demo/search.js`](../examples/rag-demo/search.js). The primitives live in [`@qkstat/rag`](../packages/rag/) — four GPU exports plus a thin `GpuIndex` helper. Here's the whole public surface:
+The interesting code is in [`examples/rag-demo/search.js`](../examples/rag-demo/search.js). The primitives live in [`@qkstat/retrieve`](../packages/retrieve/) — four GPU exports plus a thin `GpuIndex` helper. Here's the whole public surface:
 
 ```javascript
-const { GpuIndex } = require('@qkstat/rag');
+const { GpuIndex } = require('@qkstat/retrieve');
 
 // embeddings is a Float32Array of length docs.length * dim, row-major.
 const index = new GpuIndex({ docs, embeddings, dim: 384 });
@@ -84,10 +84,10 @@ const top10 = index.search(query, 10);
 index.close();
 ```
 
-Under the hood, `GpuIndex` is thirty lines wrapping four primitives — [packages/rag/lib/GpuIndex.js](../packages/rag/lib/GpuIndex.js). Drop down to them directly if you want the raw handles:
+Under the hood, `GpuIndex` is thirty lines wrapping four primitives — [packages/retrieve/lib/GpuIndex.js](../packages/retrieve/lib/GpuIndex.js). Drop down to them directly if you want the raw handles:
 
 ```javascript
-const { loadMatrixGpu, matmulHandle, searchHandle, releaseMatrixGpu } = require('@qkstat/rag');
+const { loadMatrixGpu, matmulHandle, searchHandle, releaseMatrixGpu } = require('@qkstat/retrieve');
 
 const hCorpus = loadMatrixGpu(corpusColMajor, dim, N);     // one-time H2D
 const hQuery = loadMatrixGpu(queryRowMajor, B, dim);
@@ -138,11 +138,11 @@ That script installs pixi + Node, builds the cached-matmul addon, runs the regre
 If you just want the GPU primitives in your own Node app (no bench suite, no MS-MARCO), this is now three lines:
 
 ```js
-const { loadMatrixGpu, searchHandle, releaseMatrixGpu } = require('@qkstat/rag');
+const { loadMatrixGpu, searchHandle, releaseMatrixGpu } = require('@qkstat/retrieve');
 const hCorpus = loadMatrixGpu(corpusFloat32ColMajor, dim, N);
 searchHandle(loadMatrixGpu(queryFloat32, 1, dim), hCorpus, topKIdx, topKScores);
 ```
 
 Code: [github.com/codetalcott/mojo-addon-examples](https://github.com/codetalcott/mojo-addon-examples) · the glue framework at [github.com/codetalcott/napi-mojo](https://github.com/codetalcott/napi-mojo).
 
-Feedback welcome — this is the first release of `@qkstat/rag`, and the shape of the API is still open to pull from what you actually want to build with it.
+Feedback welcome — this is the first release of `@qkstat/retrieve`, and the shape of the API is still open to pull from what you actually want to build with it.

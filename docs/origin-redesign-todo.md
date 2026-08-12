@@ -26,8 +26,8 @@ restores the old (unchecked) behavior. It is a stopgap, not a fix.
 
 | File | Struct | Fields |
 |---|---|---|
-| `packages/rag/src/kernels.mojo` | `MatmulAsyncData` | `deferred`, `work`, `a_ref`, `b_ref`, `dst_ref`, `a_ptr`, `b_ptr`, `dst_ptr`, `state_ptr` |
-| `packages/rag/src/kernels.mojo` | `SearchAsyncData` | `deferred`, `work`, `a_ref`, `b_ref`, `idx_ref`, `scores_ref`, `a_ptr`, `b_ptr`, `idx_ptr`, `scores_ptr`, `state_ptr` |
+| `packages/retrieve/src/kernels.mojo` | `MatmulAsyncData` | `deferred`, `work`, `a_ref`, `b_ref`, `dst_ref`, `a_ptr`, `b_ptr`, `dst_ptr`, `state_ptr` |
+| `packages/retrieve/src/kernels.mojo` | `SearchAsyncData` | `deferred`, `work`, `a_ref`, `b_ref`, `idx_ref`, `scores_ref`, `a_ptr`, `b_ptr`, `idx_ptr`, `scores_ptr`, `state_ptr` |
 | `packages/embed/src/embed.mojo` | `EmbedAsyncData` | `deferred`, `work`, `ids_ref`, `mask_ref`, `dst_ref` |
 | `examples/stats/addon_cached.mojo` | `CachedStats` | `data_f64` |
 
