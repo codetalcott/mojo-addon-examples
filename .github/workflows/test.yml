@@ -74,3 +74,44 @@ jobs:
 
       - name: Run smoke tests
         run: pixi run bash -c "npm test"
+
+      # GPU-execution suites, macOS only. Not a preference — the whole available
+      # surface. ubuntu-latest has no NVIDIA GPU and never will; macos-latest
+      # can execute Metal, but only partly.
+      #
+      # WHICH suites run here is measured, not assumed. metal-probe.yml ran all
+      # five independently (run 31630265503):
+      #
+      #   simd-search  hand-rolled std.gpu  pass (220 cases)
+      #   stats        hand-rolled std.gpu  pass (208 cases)
+      #   image        hand-rolled std.gpu  pass (210 cases)
+      #   matmul       linalg/layout        FAIL
+      #   retrieve     linalg/layout        FAIL
+      #
+      # The runner's Metal device runs hand-rolled std.gpu kernels but not
+      # linalg-backed ones — tiers 2 vs 3/4 in
+      # docs/mojo-runtime-isolation-spike-findings.md. packages/retrieve shows
+      # the split cleanly: loadMatrixGpu and every lifecycle/error-path test
+      # pass, while all four tests invoking matmulHandle/searchHandle fail.
+      # Allocation works, computation does not. So matmul and retrieve stay out
+      # of CI; both pass on real NVIDIA, verified by pod runs.
+      #
+      # One step per suite, never an && chain: chaining lets the first failure
+      # hide the rest, which is exactly how the earlier version of this hid
+      # three suites behind matmul, and what CLAUDE.md warns about for npm test.
+      #
+      # Asymmetry to keep in mind: macos-latest runs only on PRs targeting main,
+      # so these gate PRs but NOT pushes to main and NOT the weekly cron — both
+      # ubuntu-only. scripts/verify-all.sh (local) and scripts/verify-gpu-h100.sh
+      # (pod) remain the complete gate; this is a free subset.
+      - name: GPU — simd-search cached (macOS only)
+        if: runner.os == 'macOS'
+        run: pixi run node examples/simd-search/test_cached.js
+
+      - name: GPU — stats cached (macOS only)
+        if: runner.os == 'macOS'
+        run: pixi run node examples/stats/test_cached.js
+
+      - name: GPU — image cached (macOS only)
+        if: runner.os == 'macOS'
+        run: pixi run node examples/image/test_cached.js
