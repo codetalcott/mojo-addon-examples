@@ -98,10 +98,12 @@ On Linux x86_64, builds add `--mcpu haswell` to avoid AVX-512 instructions that 
 CI **compiles everything** (`build:all`, `build:cached`, `build:retrieve`, `build:embed`) but **tests only `npm test`** — the five CPU-only `test.js` files. That split is a capability limit, not a cost decision:
 
 - Every uncovered test is GPU-execution: the four `test_cached.js` suites and `packages/retrieve`'s Jest.
-- `ubuntu-latest` has no NVIDIA GPU, so those cannot run there at all.
-- `macos-latest` is a VM whose Metal availability is unproven. Nothing in this repo has ever executed GPU code in CI — the five `test.js` files touch none.
+- `ubuntu-latest` has no NVIDIA GPU, so those cannot run there at all — this half is permanent.
+- `macos-latest` **can** execute Metal. Verified 2026-08-12 by `.github/workflows/metal-probe.yml` (run 31628463546): `examples/simd-search/test_cached.js` passed 220 correctness cases plus a 500-iteration load/release leak-smoke inside the runner VM.
 
-So GPU correctness is gated locally by `scripts/verify-all.sh` and on a pod by `scripts/verify-gpu-h100.sh`. **Prefer adding checks there over expanding CI.**
+So the four `*_cached` suites and `packages/retrieve`'s Jest **could** be promoted onto the macOS job, upgrading it from compile-only to real GPU correctness. Note the asymmetry that would create: `macos-latest` only runs on PRs targeting `main`, so those tests would not gate pushes or the weekly cron, and `ubuntu-latest` can never run them. Re-run the probe (Actions → "Metal GPU probe (manual)") if runner images change and you need to re-confirm.
+
+Until that promotion lands, GPU correctness is gated locally by `scripts/verify-all.sh` and on a pod by `scripts/verify-gpu-h100.sh`. Those remain the authority for NVIDIA paths regardless, since no hosted runner has an NVIDIA GPU.
 
 Compile-only coverage still earns its place: `packages/retrieve` sat uncompiled from 2026-04-17 to 2026-08-12 and silently missed an entire napi-mojo + Mojo 1.0.0 migration, because nothing in CI ever built it. CI is also the only place the Linux/`sm_90` cross-compile that ships to RunPod is exercised — a Darwin laptop cannot produce that artifact.
 
