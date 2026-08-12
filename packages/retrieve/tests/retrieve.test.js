@@ -211,7 +211,12 @@ describeIfGpu('GPU matmul — correctness', () => {
     // ~350x under ATOL. Anything materially worse is a hardware/precision
     // difference worth reading the report for, not noise.
     const cmp = compareFloats(dst, expected, `matmul [${M},${K}]x[${K},${N}]`);
-    if (cmp.mismatches !== 0) throw new Error(cmp.report());
+    // Print to stdout BEFORE asserting, not only inside the thrown message.
+    // An H100 run was spent discovering that a report living solely in an
+    // exception is at the mercy of every downstream formatter: Jest prints the
+    // message above the code frame, and verify-all.sh's `tail -15` on failure
+    // kept the frame and dropped the report. Stdout survives all of that.
+    if (cmp.mismatches !== 0) console.log(cmp.report());
     expect(cmp.mismatches).toBe(0);
   });
 });
