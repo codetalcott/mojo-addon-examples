@@ -39,16 +39,28 @@ git fetch origin
 # `pixi install` / build steps routinely touch lockfiles that would
 # otherwise block the checkout.
 git reset --hard HEAD 2>/dev/null || true
-# Always force-reset to origin's spike branch. Using -B (not -b) handles the
-# case where a prior session's `git checkout -b` created a local branch
-# tracking main — plain `git checkout spike/...` would silently succeed on
-# the stale local branch and never pull in origin's latest commits.
-if git ls-remote --exit-code origin spike/embedding-kernel >/dev/null 2>&1; then
-  git checkout -B spike/embedding-kernel origin/spike/embedding-kernel
-else
-  git checkout -B spike/embedding-kernel origin/main
+
+# Which ref to run. Defaults to main; override with REPO_REF=some/branch for a
+# session that needs unmerged work.
+#
+# This used to hardcode `spike/embedding-kernel`, from the 2026-04 embedding
+# spike. That branch was deleted from origin after the spike was productized
+# into packages/embed, so the fallback silently took over — leaving pods
+# running main's code while *reporting* "on spike/embedding-kernel", a string
+# that then lands in committed capture files. The follow-up `git reset --hard
+# origin/$(current branch)` also resolved to the nonexistent
+# origin/spike/embedding-kernel, failed, and was swallowed by `|| true`, so the
+# belt-and-suspenders check had quietly stopped checking anything.
+REPO_REF="${REPO_REF:-main}"
+if ! git ls-remote --exit-code origin "$REPO_REF" >/dev/null 2>&1; then
+  echo "FATAL: origin/$REPO_REF does not exist — refusing to run against an unknown ref." >&2
+  exit 1
 fi
-# Belt-and-suspenders: ensure the tree matches origin exactly.
-git reset --hard "origin/$(git rev-parse --abbrev-ref HEAD)" 2>/dev/null || true
+# -B (not -b) handles a prior session having left a stale local branch of the
+# same name; plain `git checkout` would succeed on it and never see origin.
+git checkout -B "$REPO_REF" "origin/$REPO_REF"
+# Belt-and-suspenders: ensure the tree matches origin exactly. Unlike before,
+# this ref is known to exist, so a failure here is a real failure.
+git reset --hard "origin/$REPO_REF"
 
 echo "Ready. cd $REPO (on $(git rev-parse --abbrev-ref HEAD) at $(git rev-parse --short HEAD))"
