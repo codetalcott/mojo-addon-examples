@@ -46,11 +46,42 @@ function rand(streamId) {
 }
 
 // The tolerance every float comparison here uses: relative, with an absolute
-// floor for results near zero. Kept in one place because the floor is the part
-// that actually binds — see the diagnostics below.
+// floor for results near zero. The floor is the part that actually binds, so it
+// is derived rather than guessed.
+//
+// Why it must be derived. linalg.matmul dispatches to TF32 tensor cores for
+// FP32 inputs on H100 (see kernels.mojo's header), and TF32 keeps ~11 mantissa
+// bits against FP32's 24. A K-term dot product accumulates rounding by random
+// walk, so absolute error grows like sqrt(K) * eps * |term| — it does NOT
+// shrink with the result. Where |expected| is near zero the relative term
+// vanishes and this floor is the only thing left, which is exactly where the
+// old hardcoded 1e-3 failed.
+//
+// Measured at the committed seed, [4,64]x[64,1000]:
+//
+//   M4 Metal (scalar FP32)  max |abs err| 2.861e-6   floor never binds
+//   H100     (TF32)         max |abs err| 2.981e-3   1042x worse
+//
+// The old 1e-3 floor sat between those two numbers, so it passed on M4 and
+// failed on H100 whenever a near-zero result's error happened to clear it —
+// 1 element in 4000 at this seed. With Math.random() inputs that is an
+// intermittent failure, which is how it survived being described as "tuned
+// for H100".
+const TF32_EPS = 2 ** -11; // ~4.88e-4; FP32 is 2**-24 for comparison
+const K_DEFAULT = 64; // the K every matmul assertion here uses
+// 4x headroom over the random-walk estimate. At K=64 this is ~1.56e-2, versus
+// the 2.981e-3 actually observed on H100 — about 5x margin.
+const atolFor = (K) => 4 * Math.sqrt(K) * TF32_EPS;
 const RTOL = 1e-1;
-const ATOL = 1e-3;
+const ATOL = atolFor(K_DEFAULT);
 const tolFor = (x, y) => Math.max(RTOL * Math.max(Math.abs(x), Math.abs(y)), ATOL);
+
+// NOTE on RTOL: 1e-1 is loose. Observed relative error is ~6e-4 on H100 and
+// ~3e-5 on M4, so a 10% band would let a genuine kernel bug through on
+// large-magnitude elements. Tightening it to ~1e-2 looks safe on those numbers,
+// but it is an unvalidated change that can only be confirmed by an H100 pod
+// run, so it is deliberately left alone here rather than bundled with a fix
+// that is backed by measurement.
 
 // Summarise a float32 comparison well enough to diagnose a failure from a log
 // alone. `expect(mismatches).toBe(0)` reports a count and nothing else, which
@@ -68,6 +99,7 @@ function compareFloats(actual, expected, label) {
   let maxAbs = 0;
   let maxRel = 0;
   let worst = null;
+  let worstFail = null;
   const failMags = [];
   for (let i = 0; i < actual.length; i++) {
     const e = expected[i];
@@ -79,9 +111,19 @@ function compareFloats(actual, expected, label) {
     }
     // Relative error is meaningless near zero; only sample it where it is not.
     if (Math.abs(e) > 1e-2) maxRel = Math.max(maxRel, abs / Math.abs(e));
-    if (abs > tolFor(a, e)) {
+    const tol = tolFor(a, e);
+    if (abs > tol) {
       mismatches++;
       failMags.push(Math.abs(e));
+      // Track the worst FAILING element separately from the worst element
+      // overall. They are usually different, and conflating them is actively
+      // misleading: on H100 the largest error landed on a magnitude-5 element
+      // that passed on the relative term, while the sole failure was a
+      // near-zero element bound by the floor. Reporting only the former made
+      // the numbers look self-contradictory.
+      if (!worstFail || abs / tol > worstFail.ratio) {
+        worstFail = { i, e, a, abs, tol, ratio: abs / tol };
+      }
     }
   }
   const report = () => {
@@ -91,7 +133,10 @@ function compareFloats(actual, expected, label) {
       `  max |abs err| : ${maxAbs.toExponential(3)}`,
       `  max rel err   : ${maxRel.toExponential(3)}  (sampled where |expected|>1e-2)`,
       worst
-        ? `  worst element : expected=${worst.e.toExponential(4)} actual=${worst.a.toExponential(4)} diff=${worst.abs.toExponential(3)}`
+        ? `  worst element (any)    : expected=${worst.e.toExponential(4)} actual=${worst.a.toExponential(4)} diff=${worst.abs.toExponential(3)}`
+        : '',
+      worstFail
+        ? `  worst FAILING element  : expected=${worstFail.e.toExponential(4)} actual=${worstFail.a.toExponential(4)} diff=${worstFail.abs.toExponential(3)} tol=${worstFail.tol.toExponential(3)} (${worstFail.ratio.toFixed(1)}x over)`
         : '',
       failMags.length
         ? `  failures with |expected|<0.05: ${near}/${failMags.length}` +
