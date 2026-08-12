@@ -73,6 +73,20 @@ function jsMatmul(a, b, M, K, N) {
 const TF32_EPS = 2 ** -11;
 const atolFor = (K) => 4 * Math.sqrt(K) * TF32_EPS;
 
+// RTOL only governs where the relative term exceeds the floor, i.e. where
+//     RTOL * |e| > ATOL   <=>   |e| > ATOL / RTOL
+// Below that crossover ATOL decides the comparison, so relative error sampled
+// there says nothing about how tight RTOL could be.
+//
+// The first version of this tool sampled every |e| > 1e-2 and reported max
+// relative errors of 0.10–0.27 on H100, concluding "do NOT tighten RTOL below
+// 2.7e+0" — 270%, which is nonsense. At K=256 the crossover is |e| > 0.313
+// while the threshold was 1e-2, so the statistic was dominated by small
+// elements that ATOL rescues. Measuring in the wrong regime produces a
+// confident number about the wrong question.
+const RTOL_CURRENT = 1e-1;
+const relCrossover = (K) => atolFor(K) / RTOL_CURRENT;
+
 function runOne(K, seed) {
   const r = mulberry32(seed);
   const rnd = () => r() * 2 - 1;
@@ -91,14 +105,19 @@ function runOne(K, seed) {
 
   let maxAbs = 0;
   let maxRel = 0;
+  let relSamples = 0;
+  const crossover = relCrossover(K);
   for (let i = 0; i < dst.length; i++) {
     const e = expected[i];
     const abs = Math.abs(dst[i] - e);
     if (abs > maxAbs) maxAbs = abs;
-    // Relative error is meaningless near zero; sample only where it is not.
-    if (Math.abs(e) > 1e-2) maxRel = Math.max(maxRel, abs / Math.abs(e));
+    // Only where RTOL actually governs — see relCrossover above.
+    if (Math.abs(e) > crossover) {
+      maxRel = Math.max(maxRel, abs / Math.abs(e));
+      relSamples++;
+    }
   }
-  return { maxAbs, maxRel };
+  return { maxAbs, maxRel, relSamples };
 }
 
 const pct = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
@@ -114,9 +133,12 @@ for (const K of K_VALUES) {
   const abs = [];
   const rel = [];
   for (let s = 1; s <= SEEDS; s++) {
-    const { maxAbs, maxRel } = runOne(K, s * 0x9e3779b9);
+    const { maxAbs, maxRel, relSamples } = runOne(K, s * 0x9e3779b9);
     abs.push(maxAbs);
-    rel.push(maxRel);
+    // Only record a relative sample when some element was actually above the
+    // crossover; otherwise RTOL was untested at this K and a 0 would read as
+    // "perfectly accurate" rather than "not measured".
+    if (relSamples > 0) rel.push(maxRel);
   }
   abs.sort((x, y) => x - y);
   rel.sort((x, y) => x - y);
@@ -126,11 +148,12 @@ for (const K of K_VALUES) {
   worstMargin = Math.min(worstMargin, margin);
   // Normalised by sqrt(K): flat across K means the sqrt(K) model holds.
   const perSqrtK = mx / Math.sqrt(K);
-  rows.push({ K, mx, atol, margin, perSqrtK, relMax: rel[rel.length - 1] });
+  const relMax = rel.length ? rel[rel.length - 1] : null;
+  rows.push({ K, mx, atol, margin, perSqrtK, relMax });
   console.log(
     `  ${String(K).padStart(3)}  ${String(SEEDS).padStart(5)}  ` +
       `${mx.toExponential(3)}  ${pct(abs, 0.5).toExponential(3)}  ` +
-      `${rel[rel.length - 1].toExponential(3)}  ${atol.toExponential(2)}  ` +
+      `${(relMax === null ? '   n/a   ' : relMax.toExponential(3)).padStart(9)}  ${atol.toExponential(2)}  ` +
       `${margin.toFixed(1).padStart(5)}x   ${perSqrtK.toExponential(2)}`,
   );
 }
@@ -160,10 +183,17 @@ if (rows.length < 2) {
 }
 
 console.log('');
-console.log('RTOL guidance (currently 1e-1, left loose pending this data):');
-const relWorst = Math.max(...rows.map((r) => r.relMax));
+console.log(`RTOL guidance (currently ${RTOL_CURRENT.toExponential(0)}), measured only where RTOL governs:`);
+const relRows = rows.filter((r) => r.relMax !== null);
+if (!relRows.length) {
+  console.log('  no element exceeded the ATOL/RTOL crossover at any K —');
+  console.log('  RTOL was never the deciding term, so this run says nothing about it.');
+  process.exit(allPass ? 0 : 1);
+}
+const relWorst = Math.max(...relRows.map((r) => r.relMax));
 const suggested = 10 * relWorst;
-console.log(`  worst relative error over all seeds and K : ${relWorst.toExponential(3)}`);
+console.log(`  crossover |e| > ATOL/RTOL, e.g. ${relCrossover(64).toFixed(3)} at K=64`);
+console.log(`  worst relative error above crossover     : ${relWorst.toExponential(3)}`);
 console.log(`  10x headroom would allow RTOL            : ${suggested.toExponential(3)}`);
 console.log(
   suggested < 1e-2

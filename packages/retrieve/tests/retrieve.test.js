@@ -67,6 +67,29 @@ function rand(streamId) {
 // 1 element in 4000 at this seed. With Math.random() inputs that is an
 // intermittent failure, which is how it survived being described as "tuned
 // for H100".
+//
+// VALIDATED by scripts/tf32-error-sweep.js on H100, 20 seeds x K in
+// {16,32,64,128,256} (docs/tf32-error-sweep-h100.txt):
+//
+//   K     max |abs err|   ATOL       margin
+//   16    1.721e-3        7.81e-3    4.5x
+//   32    2.716e-3        1.10e-2    4.1x
+//   64    3.189e-3        1.56e-2    4.9x
+//   128   4.141e-3        2.21e-2    5.3x
+//   256   6.267e-3        3.13e-2    5.0x
+//
+// max|abs|/sqrt(K) is flat at ~4e-4 across the range (spread 1.31x), so the
+// sqrt(K) shape is real on TF32 and the floor extrapolates: at the K=384
+// production shape it predicts ~7.9e-3 against an ATOL of 3.8e-2.
+//
+// Note the single-seed figure above (2.981e-3) was slightly below the 20-seed
+// max at K=64 (3.189e-3) — one sample understated the tail, which is why the
+// margin is ~4-5x rather than the 5.2x originally claimed.
+//
+// M4 is NOT a proxy for this. Sweeping M4 shows error growing linearly in K,
+// not as sqrt(K), because scalar FP32 rounds once per addition while TF32
+// tensor cores accumulate differently. Fitting the exponent to M4 data would
+// have broken a model that is correct for the hardware that ships.
 const TF32_EPS = 2 ** -11; // ~4.88e-4; FP32 is 2**-24 for comparison
 const K_DEFAULT = 64; // the K every matmul assertion here uses
 // 4x headroom over the random-walk estimate. At K=64 this is ~1.56e-2, versus
@@ -76,12 +99,22 @@ const RTOL = 1e-1;
 const ATOL = atolFor(K_DEFAULT);
 const tolFor = (x, y) => Math.max(RTOL * Math.max(Math.abs(x), Math.abs(y)), ATOL);
 
-// NOTE on RTOL: 1e-1 is loose. Observed relative error is ~6e-4 on H100 and
-// ~3e-5 on M4, so a 10% band would let a genuine kernel bug through on
-// large-magnitude elements. Tightening it to ~1e-2 looks safe on those numbers,
-// but it is an unvalidated change that can only be confirmed by an H100 pod
-// run, so it is deliberately left alone here rather than bundled with a fix
-// that is backed by measurement.
+// RTOL stays at 1e-1, and the sweep says that is correct rather than merely
+// untested.
+//
+// RTOL only decides a comparison where the relative term exceeds the floor,
+// i.e. |expected| > ATOL/RTOL (0.156 at K=64). Above that crossover, measured
+// relative error is ~1.1e-5 on M4; TF32 runs ~1000x looser in absolute terms,
+// putting H100 near ~1e-2 at K=256. Tightening RTOL to 1e-2 would therefore
+// land at roughly 0.9x margin — a change that looks like a safety improvement
+// and would in fact make the suite fail on the hardware it ships for.
+//
+// An earlier reading suggested the opposite because it sampled relative error
+// wherever |expected| > 1e-2, which on H100 is far below the crossover, so the
+// statistic was dominated by small elements that ATOL rescues and reported
+// 10-27% "relative error". Measuring in the wrong regime yields a confident
+// answer to a different question; scripts/tf32-error-sweep.js now samples only
+// above the crossover.
 
 // Summarise a float32 comparison well enough to diagnose a failure from a log
 // alone. `expect(mismatches).toBe(0)` reports a count and nothing else, which
