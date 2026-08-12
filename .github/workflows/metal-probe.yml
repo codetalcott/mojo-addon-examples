@@ -52,27 +52,67 @@ jobs:
           echo "--- Metal devices seen by the OS ---"
           system_profiler SPDisplaysDataType 2>/dev/null | head -20 || echo "(system_profiler returned nothing)"
 
-      - name: Build one cached (GPU) addon
-        run: pixi run bash -c "npm run build:search-cached"
+      # build:all is required, not optional: stats/test_cached.js and
+      # image/test_cached.js load BOTH the one-shot and the cached addon. A
+      # previous run of this probe built only build:cached + build:retrieve and
+      # recorded stats and image as GPU failures when they had in fact died on
+      # "stats.node not found" — a missing prerequisite, not a Metal limit.
+      - name: Build all GPU targets
+        run: pixi run bash -c "npm run build:all && npm run build:cached && npm run build:retrieve"
 
-      # The actual probe. test_cached.js drives loadGpu/countByteHandle/
-      # releaseGpu — a real Metal buffer upload, kernel launch, and readback. If
-      # Metal is unavailable in the VM this fails here, at runtime, having
-      # already proven the compile half works.
-      - name: Execute a GPU test
-        id: gpu
+      # Every GPU suite, each isolated behind continue-on-error so one failure
+      # cannot mask the others.
+      #
+      # The first version of this probe ran ONLY simd-search, and its passing
+      # was generalised to "Metal works, promote everything." That was wrong:
+      # promoting all five (#23) failed on matmul, whose handle API is backed by
+      # linalg.matmul[target="gpu"] rather than a hand-rolled std.gpu kernel.
+      # Because npm's && chain stops at the first failure, matmul also hid the
+      # three suites behind it — the exact trap documented for `npm test`.
+      #
+      # Suites are ordered and labelled by kernel style to test the hypothesis
+      # that split them: hand-rolled std.gpu kernels run on the runner's Metal
+      # device, while linalg/layout-backed ones do not. Those are tiers 2 vs 3/4
+      # in docs/mojo-runtime-isolation-spike-findings.md.
+      - name: simd-search — hand-rolled std.gpu
+        id: t_search
         continue-on-error: true
         run: pixi run node examples/simd-search/test_cached.js
 
-      - name: Verdict
+      - name: stats — hand-rolled std.gpu
+        id: t_stats
+        continue-on-error: true
+        run: pixi run node examples/stats/test_cached.js
+
+      - name: image — hand-rolled std.gpu
+        id: t_image
+        continue-on-error: true
+        run: pixi run node examples/image/test_cached.js
+
+      - name: matmul — linalg/layout
+        id: t_matmul
+        continue-on-error: true
+        run: pixi run node examples/matmul/test_cached.js
+
+      - name: packages/retrieve — linalg/layout
+        id: t_retrieve
+        continue-on-error: true
+        run: pixi run bash -c "cd packages/retrieve && npm test"
+
+      - name: Verdict matrix
         run: |
-          if [ "${{ steps.gpu.outcome }}" = "success" ]; then
-            echo "### Metal GPU execution WORKS on macos-latest" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "The four \`*_cached\` suites and \`packages/retrieve\`'s Jest can be promoted into \`test.yml\`, upgrading CI from compile-only to real GPU correctness coverage on every PR." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "### Metal GPU execution FAILS on macos-latest" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Compile-only is the correct ceiling for hosted CI. GPU correctness stays with \`scripts/verify-all.sh\` (local) and \`scripts/verify-gpu-h100.sh\` (pod). See the step log above for how it failed." >> "$GITHUB_STEP_SUMMARY"
-          fi
-          echo "Probe result: ${{ steps.gpu.outcome }}"
+          {
+            echo "## Metal GPU execution on \`macos-latest\`"
+            echo ""
+            echo "| Suite | Kernel style | Result |"
+            echo "|---|---|---|"
+            echo "| simd-search | hand-rolled \`std.gpu\` | ${{ steps.t_search.outcome }} |"
+            echo "| stats | hand-rolled \`std.gpu\` | ${{ steps.t_stats.outcome }} |"
+            echo "| image | hand-rolled \`std.gpu\` | ${{ steps.t_image.outcome }} |"
+            echo "| matmul | \`linalg\`/\`layout\` | ${{ steps.t_matmul.outcome }} |"
+            echo "| packages/retrieve | \`linalg\`/\`layout\` | ${{ steps.t_retrieve.outcome }} |"
+            echo ""
+            echo "Promote exactly the suites that pass into \`test.yml\`; leave the rest to"
+            echo "\`scripts/verify-all.sh\` (local) and \`scripts/verify-gpu-h100.sh\` (pod)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "search=${{ steps.t_search.outcome }} stats=${{ steps.t_stats.outcome }} image=${{ steps.t_image.outcome }} matmul=${{ steps.t_matmul.outcome }} retrieve=${{ steps.t_retrieve.outcome }}"
