@@ -9,7 +9,6 @@ build/
 .agents/
 skills/
 skills-lock.json
-grail.yaml
 examples/rag-demo/fixtures/*.bin
 examples/rag-demo/fixtures/.cache/
 
