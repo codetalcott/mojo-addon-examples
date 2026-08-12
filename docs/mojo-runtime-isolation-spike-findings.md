@@ -3,7 +3,7 @@
 **Branch:** `spike/mojo-runtime-isolation`
 **Date:** 2026-04-17
 **Toolchain:** Mojo `0.26.3.0.dev2026041716`, M4 Metal (Darwin arm64)
-**Goal:** answer a question raised while drafting outreach to Modular's licensing team — *if Modular declines our request to bundle MAX runtime libs in `@qkstat/rag`, can we eliminate the MAX dependency by stripping `linalg` and `layout` and writing kernels against `std.gpu` only?*
+**Goal:** answer a question raised while drafting outreach to Modular's licensing team — *if Modular declines our request to bundle MAX runtime libs in `@qkstat/retrieve`, can we eliminate the MAX dependency by stripping `linalg` and `layout` and writing kernels against `std.gpu` only?*
 
 Short version: **the libs the letter assumed were "MAX runtime, target-agnostic" are actually Mojo compiler runtime, pulled in unconditionally by every Mojo binary including hello-world.** Stripping `linalg`/`layout` from the source does *not* change the dynamic-library footprint on Darwin/Metal. It does, however, change which `.mojopkg`s are touched at compile time — and that may matter independently for licensing.
 
@@ -17,7 +17,7 @@ Short version: **the libs the letter assumed were "MAX runtime, target-agnostic"
 | 1 | + `std.algorithm` (vectorize/parallelize), `std.memory` (alloc) | no |
 | 2 | + `std.gpu`, `std.gpu.host` — hand-rolled kernel, raw `UnsafePointer` args | metal:4 |
 | 3 | + `layout` (TileTensor / row_major) | metal:4 |
-| 4 | + `linalg.matmul[target="gpu"]` — current `packages/rag` baseline | metal:4 |
+| 4 | + `linalg.matmul[target="gpu"]` — current `packages/retrieve` baseline | metal:4 |
 
 Build + inspection driver: [`spikes/mojo-runtime/build_and_inspect.sh`](../spikes/mojo-runtime/build_and_inspect.sh). On Darwin it uses `otool -L` plus a transitive walk that follows `@rpath/` references through the pixi env. On Linux it uses `ldd`.
 
@@ -123,7 +123,7 @@ The conservative reading: treat `linalg.mojopkg` and `layout.mojopkg` as MCL-cov
 
 ### c. Tier 2 (raw kernel via `std.gpu` only) avoids `linalg` and `layout` entirely.
 
-`examples/image/addon.mojo` already proves the pattern: `UnsafePointer`-based kernels with `ctx.enqueue_function` work without importing `layout` or `linalg`. We can rewrite `packages/rag/src/kernels.mojo` to follow this pattern — see "Refactor sketch" below. The result would touch only `std.mojopkg`, which is unambiguously Apache-2.0 + LLVM-exceptions.
+`examples/image/addon.mojo` already proves the pattern: `UnsafePointer`-based kernels with `ctx.enqueue_function` work without importing `layout` or `linalg`. We can rewrite `packages/retrieve/src/kernels.mojo` to follow this pattern — see "Refactor sketch" below. The result would touch only `std.mojopkg`, which is unambiguously Apache-2.0 + LLVM-exceptions.
 
 The dynamic-library footprint would not change (still pulls in the Mojo compiler runtime libs), but the compiled-in kernel code would all be derived from open-source `std.mojopkg`, not from `linalg`/`layout`. The Modular conversation then becomes:
 
@@ -131,14 +131,14 @@ The dynamic-library footprint would not change (still pulls in the Mojo compiler
 
 That's a much cleaner question to ask Modular than the original letter's, and it has a much higher chance of "yes" because the alternative (no) implies Mojo binaries can't ship.
 
-## Refactor sketch — `packages/rag` without `linalg`/`layout`
+## Refactor sketch — `packages/retrieve` without `linalg`/`layout`
 
 Replace `linalg.matmul[target="gpu"]` with a hand-rolled tile-based GEMM. Replace TileTensor wrapping with raw `UnsafePointer` (template: `examples/image/addon.mojo:_gpu_kernel_grayscale`). Concretely:
 
-1. Move `_matmul_cached` and `_search_cached` in `packages/rag/src/kernels.mojo` to call a new `_gpu_kernel_matmul` written against `std.gpu` only.
+1. Move `_matmul_cached` and `_search_cached` in `packages/retrieve/src/kernels.mojo` to call a new `_gpu_kernel_matmul` written against `std.gpu` only.
 2. The kernel: standard tiled FP32 GEMM with `stack_allocation[..., AddressSpace.SHARED]` from `std.gpu.memory` for the per-block A/B tiles, `std.gpu.barrier` for sync.
 3. Performance impact unknown — `linalg` dispatches to tuned kernels (TF32 tensor cores on H100, scalar Metal kernels on M4). The notes in `kernels.mojo` (lines 51–60) record an earlier attempt at hand-rolling on M4 that came out 1.7× slower at batch=64. On H100 the `linalg` path uses TF32 tensor cores (4× theoretical speedup over scalar FP32); a hand-rolled FP32 kernel without tensor-core intrinsics would be slower. Hand-rolling with `wmma`-style intrinsics from `std.gpu` is possible but a much larger lift.
-4. **Recommended bench gate before committing to refactor:** prototype the hand-rolled kernel on tier 2's pattern, bench at `[1, 384] × [384, 10k]` (the canonical `packages/rag` shape) on H100. If we land within 2× of `linalg`'s 0.06 ms, the licensing win pays for itself. If we're 5–10× slower, the package's value proposition collapses and we stay on `linalg`.
+4. **Recommended bench gate before committing to refactor:** prototype the hand-rolled kernel on tier 2's pattern, bench at `[1, 384] × [384, 10k]` (the canonical `packages/retrieve` shape) on H100. If we land within 2× of `linalg`'s 0.06 ms, the licensing win pays for itself. If we're 5–10× slower, the package's value proposition collapses and we stay on `linalg`.
 
 A separate option not explored here: keep `linalg` and ask Modular for explicit clearance on the compiled-in kernel code. Smaller scope than the original letter.
 

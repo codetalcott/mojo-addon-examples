@@ -1,6 +1,6 @@
 # Embedding Kernel Spike — Findings
 
-Spike question: can a Mojo N-API addon run MiniLM-L6-v2 embeddings on H100 fast enough to compose with [`packages/rag`](../packages/rag/) inside one Node process? Answer: yes — 1.44 ms per-query (batch-1, seq-32, 1k corpus, warm-path), ~2× faster than an ONNX + hnswlib CPU reference. Productized as [`packages/embed/`](../packages/embed/).
+Spike question: can a Mojo N-API addon run MiniLM-L6-v2 embeddings on H100 fast enough to compose with [`packages/retrieve`](../packages/retrieve/) inside one Node process? Answer: yes — 1.44 ms per-query (batch-1, seq-32, 1k corpus, warm-path), ~2× faster than an ONNX + hnswlib CPU reference. Productized as [`packages/embed/`](../packages/embed/).
 
 ## Expectation
 
@@ -46,10 +46,10 @@ JS query
   → ctypes.memmove into JS Float32Array
 
 (composes with:)
-  packages/rag loadMatrixGpu → matmulHandle → searchHandle (exact cosine + top-k)
+  packages/retrieve loadMatrixGpu → matmulHandle → searchHandle (exact cosine + top-k)
 ```
 
-Both `embed.node` and `rag.node` load into the **same Node process** with **separate CUDA contexts** — the kernel-factory composition.
+Both `embed.node` and `retrieve.node` load into the **same Node process** with **separate CUDA contexts** — the kernel-factory composition.
 
 ## Findings
 
@@ -114,7 +114,7 @@ Per-stage breakdown (batch-1, seq-32, 1k corpus):
 |---|---|
 | Tokenize (JS, `@huggingface/transformers`) | 0.06 ms |
 | Embed (MAX GPU forward + D2H) | 1.30 ms |
-| Search (`packages/rag` matmul + top-k) | 0.084 ms |
+| Search (`packages/retrieve` matmul + top-k) | 0.084 ms |
 | **Total** | **1.44 ms** |
 
 Raw capture: [`docs/runpod-day5-bench-20260417T001138Z.txt`](runpod-day5-bench-20260417T001138Z.txt).
