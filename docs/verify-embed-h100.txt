@@ -1,0 +1,139 @@
+# runpod-launch.sh
+# gpu: NVIDIA H100 80GB HBM3  cloud: SECURE
+# command: npm install --no-audit --no-fund && bash scripts/verify-all.sh --with-embed-test
+# started: 2026-08-12T18:56:56Z
+---
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100 16555  100 16555    0     0   176k      0 --:--:-- --:--:-- --:--:--  177k
+node v22.23.2  pixi pixi 0.76.2
+=== host 1d748e28e1e8 === Wed Aug 12 18:57:10 UTC 2026 ===
+NVIDIA H100 80GB HBM3, 81559 MiB
+=== command: npm install --no-audit --no-fund && bash scripts/verify-all.sh --with-embed-test ===
+npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+
+added 323 packages in 20s
+npm notice
+npm notice New major version of npm available! 10.9.8 -> 12.0.2
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.2
+npm notice To update run: npm install -g npm@12.0.2
+npm notice
+############ preflight ############
+Linux x86_64
+NVIDIA H100 80GB HBM3, 81559 MiB, 580.126.09
+napi-mojo 0.7.0
+Mojo 1.0.0 (ed45d567)
+
+############ builds — one-shot ############
+::: build matmul
+    PASS
+::: build simd-search
+    PASS
+::: build stats
+    PASS
+::: build image
+    PASS
+::: build wyhash
+    PASS
+
+############ builds — cached (persistent-buffer) ############
+::: build matmul_cached
+    PASS
+::: build search_cached
+    PASS
+::: build stats_cached
+    PASS
+::: build image_cached
+    PASS
+
+############ builds — packages ############
+::: build packages/retrieve
+    PASS
+::: build packages/embed
+    PASS
+
+############ correctness — one-shot (CPU paths) ############
+::: test matmul
+    PASS
+::: test simd-search
+    PASS
+::: test stats
+    PASS
+::: test image
+    PASS
+::: test wyhash
+    PASS
+
+############ correctness — cached (GPU execution) ############
+::: test matmul_cached
+    PASS
+::: test search_cached
+    PASS
+::: test stats_cached
+    PASS
+::: test image_cached
+    PASS
+
+############ correctness — packages ############
+::: jest packages/retrieve
+    FAIL — errors, then tail:
+            120 |       if (Math.abs(dst[i] - expected[i]) > tol) mismatches++;
+            121 |     }
+          > 122 |     expect(mismatches).toBe(0);
+                |                        ^
+            123 |   });
+            124 | });
+            125 |
+      
+            at Object.toBe (tests/retrieve.test.js:122:24)
+      
+      Test Suites: 1 failed, 1 total
+      Tests:       1 failed, 7 passed, 8 total
+      Snapshots:   0 total
+      Time:        1.542 s
+      Ran all test suites matching /tests\//i.
+::: test packages/embed
+    FAIL —
+      3339 external/tcmalloc+/tcmalloc/internal/system_allocator.h:713] Warning: Unable to mbind memory (errno=1, base=0x1340c0000000, nodemask=1)
+      FAIL: Error: /workspace/mojo-addon-examples/packages/embed/fixtures/sanity-set.txt missing — run packages/embed/reference.js
+          at loadSanitySet (/workspace/mojo-addon-examples/packages/embed/test-roundtrip.js:45:32)
+          at main (/workspace/mojo-addon-examples/packages/embed/test-roundtrip.js:64:21)
+          at Object.<anonymous> (/workspace/mojo-addon-examples/packages/embed/test-roundtrip.js:113:1)
+          at Module._compile (node:internal/modules/cjs/loader:1934:14)
+          at Module._extensions..js (node:internal/modules/cjs/loader:2074:10)
+          at Module.load (node:internal/modules/cjs/loader:1656:32)
+          at Module._load (node:internal/modules/cjs/loader:1448:12)
+          at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+          at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+          at node:internal/main/run_main_module:33:47
+::: demo packages/embed
+    PASS
+
+############ summary ############
+PASS  build matmul
+PASS  build simd-search
+PASS  build stats
+PASS  build image
+PASS  build wyhash
+PASS  build matmul_cached
+PASS  build search_cached
+PASS  build stats_cached
+PASS  build image_cached
+PASS  build packages/retrieve
+PASS  build packages/embed
+PASS  test matmul
+PASS  test simd-search
+PASS  test stats
+PASS  test image
+PASS  test wyhash
+PASS  test matmul_cached
+PASS  test search_cached
+PASS  test stats_cached
+PASS  test image_cached
+FAIL  jest packages/retrieve
+FAIL  test packages/embed
+PASS  demo packages/embed
+
+SOME FAILURES — see above

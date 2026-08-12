@@ -156,6 +156,22 @@ step "jest packages/retrieve" bash -c "cd '$ROOT_DIR/packages/retrieve' && pixi 
 if [ "$SKIP_EMBED" -eq 1 ]; then
   skip "test packages/embed" "--skip-embed"
 elif [ "$WITH_EMBED_TEST" -eq 1 ]; then
+  # test-roundtrip.js needs BOTH fixtures/ground-truth.bin and
+  # fixtures/sanity-set.txt, produced together by reference.js. Neither is
+  # committed (only examples/rag-demo/fixtures/*.bin is git-ignored; these are
+  # simply absent), so any fresh clone — every pod, every runner — has no
+  # fixtures and the test dies on "sanity-set.txt missing". That reads as an
+  # embed failure and is not one; it cost a full H100 session to learn.
+  #
+  # Generate on demand rather than up front: reference.js pulls MiniLM through
+  # @huggingface/transformers and runs 100 sentences on CPU, so it needs network
+  # and a minute, and there is no reason to pay that when the fixtures exist.
+  if [ -f "$ROOT_DIR/packages/embed/fixtures/ground-truth.bin" ] \
+     && [ -f "$ROOT_DIR/packages/embed/fixtures/sanity-set.txt" ]; then
+    skip "generate embed fixtures" "already present"
+  else
+    step "generate embed fixtures" pixi run node packages/embed/reference.js
+  fi
   # Gate F4 correctness — embeddings match the reference within tolerance.
   step "test packages/embed" pixi run node packages/embed/test-roundtrip.js
   # The composition claim itself: embed.node (MAX Python interop) and
