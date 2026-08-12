@@ -86,6 +86,18 @@ if [ "$(uname -s)" = "Darwin" ]; then
   fi
 fi
 
+# On Linux the GPU-execution suites need a real NVIDIA device. Informational
+# rather than fatal: the builds and the CPU suites are still worth running on a
+# GPU-less box, and the per-step status makes it obvious which ones died.
+if [ "$(uname -s)" = "Linux" ]; then
+  if command -v nvidia-smi > /dev/null 2>&1; then
+    nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>/dev/null \
+      || echo "GPU: nvidia-smi present but query failed"
+  else
+    echo "GPU: no nvidia-smi — the cached and retrieve suites will fail (builds still valid)"
+  fi
+fi
+
 if ! command -v pixi > /dev/null 2>&1; then
   echo "FATAL: pixi not on PATH — the Mojo toolchain comes from it." >&2
   exit 1
@@ -140,11 +152,18 @@ step "jest packages/retrieve" bash -c "cd '$ROOT_DIR/packages/retrieve' && pixi 
 if [ "$SKIP_EMBED" -eq 1 ]; then
   skip "test packages/embed" "--skip-embed"
 elif [ "$WITH_EMBED_TEST" -eq 1 ]; then
+  # Gate F4 correctness — embeddings match the reference within tolerance.
   step "test packages/embed" pixi run node packages/embed/test-roundtrip.js
+  # The composition claim itself: embed.node (MAX Python interop) and
+  # retrieve.node (Mojo N-API) loaded into ONE Node process with separate CUDA
+  # contexts. test-roundtrip.js exercises embed alone, so without this the
+  # kernel-factory thesis goes unverified.
+  step "demo packages/embed" pixi run node packages/embed/demo.js
 else
   # Downloads MiniLM weights and needs a working Accelerator(); on Apple silicon
   # MAX reports "Not implemented for device: Apple M4", so this is opt-in.
   skip "test packages/embed" "opt in with --with-embed-test"
+  skip "demo packages/embed" "opt in with --with-embed-test"
 fi
 
 echo

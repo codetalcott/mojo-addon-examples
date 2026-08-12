@@ -1,0 +1,78 @@
+name: Metal GPU probe (manual)
+
+# Answers one question: can a GitHub-hosted macos-latest runner EXECUTE Metal
+# GPU code, or only compile it?
+#
+# Why it is unknown. test.yml compiles GPU kernels on macos-latest and always
+# has, so the Metal Toolchain is clearly present in the runner image. But
+# nothing in this repo has ever *run* GPU code in CI — all five test.js files
+# in `npm test` are CPU-only. macos-latest is a VM, and Metal device
+# availability inside it is not something we can assume either way.
+#
+# Why it matters. If Metal works here, the four *_cached suites and
+# packages/retrieve's Jest (12 GPU-execution tests total) could move into
+# test.yml, turning compile-only coverage into real correctness coverage on
+# every PR. If it does not, that door is closed and GPU correctness stays
+# where it is — scripts/verify-all.sh locally, scripts/verify-gpu-h100.sh on a
+# pod — and we stop wondering.
+#
+# workflow_dispatch ONLY, deliberately: no push, pull_request, or schedule
+# trigger, so this costs nothing until a human runs it. Run it from the Actions
+# tab, read the summary, and act on the result. Leave it dormant afterwards.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: prefix-dev/setup-pixi@v0.8.8
+        with:
+          pixi-version: latest
+          manifest-path: pixi.toml
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Report Metal Toolchain and GPU visibility
+        run: |
+          xcodebuild -showComponent MetalToolchain 2>&1 | head -5 || true
+          echo "--- Metal devices seen by the OS ---"
+          system_profiler SPDisplaysDataType 2>/dev/null | head -20 || echo "(system_profiler returned nothing)"
+
+      - name: Build one cached (GPU) addon
+        run: pixi run bash -c "npm run build:search-cached"
+
+      # The actual probe. test_cached.js drives loadGpu/countByteHandle/
+      # releaseGpu — a real Metal buffer upload, kernel launch, and readback. If
+      # Metal is unavailable in the VM this fails here, at runtime, having
+      # already proven the compile half works.
+      - name: Execute a GPU test
+        id: gpu
+        continue-on-error: true
+        run: pixi run node examples/simd-search/test_cached.js
+
+      - name: Verdict
+        run: |
+          if [ "${{ steps.gpu.outcome }}" = "success" ]; then
+            echo "### Metal GPU execution WORKS on macos-latest" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "The four \`*_cached\` suites and \`packages/retrieve\`'s Jest can be promoted into \`test.yml\`, upgrading CI from compile-only to real GPU correctness coverage on every PR." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Metal GPU execution FAILS on macos-latest" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Compile-only is the correct ceiling for hosted CI. GPU correctness stays with \`scripts/verify-all.sh\` (local) and \`scripts/verify-gpu-h100.sh\` (pod). See the step log above for how it failed." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "Probe result: ${{ steps.gpu.outcome }}"
