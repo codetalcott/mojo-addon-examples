@@ -1,12 +1,30 @@
 #!/usr/bin/env bash
 # scripts/bootstrap.sh — canonical source for the pod-side session bootstrap.
 #
-# This file is the source of truth. The Network Volume holds a copy at
-# /workspace/persist/bootstrap.sh which pods source at session start. To
-# update an existing volume, run:
+# This file is the source of truth, but it is NOT what runs. The Network Volume
+# holds a copy at /workspace/persist/bootstrap.sh, and that copy is what pods
+# source at session start (see BOOTSTRAP in scripts/runpod-launch.sh). Merging a
+# change here does not deploy it — the volume keeps serving the old copy until
+# it is overwritten.
+#
+# To push this file onto the volume:
 #
 #   ./scripts/runpod-launch.sh -- \
-#     "cd /workspace/mojo-addon-examples && git checkout -B spike/embedding-kernel origin/spike/embedding-kernel && cp scripts/bootstrap.sh /workspace/persist/bootstrap.sh && chmod +x /workspace/persist/bootstrap.sh"
+#     "cd /workspace/mojo-addon-examples && cp scripts/bootstrap.sh /workspace/persist/bootstrap.sh && chmod +x /workspace/persist/bootstrap.sh"
+#
+# No `git checkout` is needed first: the volume's bootstrap has already synced
+# the repo before the command runs. The previous version of this comment did
+# include one, pinned to `origin/spike/embedding-kernel` — a branch deleted when
+# that spike became packages/embed, which made the documented update command
+# fail outright.
+#
+# Since the copy step is cheap, a session that needs the newest bootstrap can
+# fold it into its own command and get both in one pod:
+#
+#   ./scripts/runpod-launch.sh --capture-to docs/verify-embed-h100.txt -- \
+#     "cp scripts/bootstrap.sh /workspace/persist/bootstrap.sh && \
+#      chmod +x /workspace/persist/bootstrap.sh && \
+#      bash scripts/verify-all.sh --with-embed-test"
 #
 # Fresh seeds should cp this file onto the volume during step 4 of the
 # Day 0 setup (see ideas/embedding-kernel-spike-plan.md).
