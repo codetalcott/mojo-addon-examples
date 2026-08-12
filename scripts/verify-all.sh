@@ -58,13 +58,18 @@ step() {  # step <label> <cmd...>
     FAILED=1
     # Short logs (a lone ABORT from a stale .node) print whole; long compile
     # logs get an error summary first, since the tail is usually link noise.
-    if [ "$(wc -l < "$LOG")" -le 15 ]; then
+    if [ "$(wc -l < "$LOG")" -le 40 ]; then
       echo "    FAIL —"
       sed 's/^/      /' "$LOG"
     else
       echo "    FAIL — errors, then tail:"
-      grep -E "error:|ABORT:" "$LOG" | grep -v "^oss/" | sort -u | head -10 | sed 's/^/      /'
-      tail -15 "$LOG" | sed 's/^/      /'
+      # Grep the diagnostic vocabulary too, not just compiler errors. An H100
+      # run was wasted because retrieve's Jest printed a rich tolerance report
+      # that matched none of these patterns and sat outside a 15-line tail, so
+      # the capture preserved the stack frame and discarded the finding.
+      grep -E "error:|ABORT:|outside tol|max \|abs err\||worst element|failures with|-> " "$LOG" \
+        | grep -v "^oss/" | sort -u | head -20 | sed 's/^/      /'
+      tail -30 "$LOG" | sed 's/^/      /'
     fi
   fi
 }
