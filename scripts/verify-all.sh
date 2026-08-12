@@ -40,7 +40,11 @@ done
 
 FAILED=0
 declare -a RESULTS=()
-LOG="$(mktemp -t verify-all)"
+# NOT `mktemp -t verify-all`: that is a BSD-ism. GNU coreutils treats -t's
+# argument as a template and rejects one without a trailing XXX run, so the
+# BSD spelling dies with "too few X's in template" on Linux — which is every
+# pod and CI runner. An explicit path with XXXXXX works on both.
+LOG="$(mktemp "${TMPDIR:-/tmp}/verify-all.XXXXXX")"
 trap 'rm -f "$LOG"' EXIT
 
 step() {  # step <label> <cmd...>
