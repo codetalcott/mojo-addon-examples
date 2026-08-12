@@ -31,7 +31,7 @@ from napi.framework.args import CbArgs
 from napi.framework.register import fn_ptr, ModuleBuilder
 
 
-alias EMBED_DIM = 384
+comptime EMBED_DIM = 384
 
 
 def _import_embed_module() raises -> PythonObject:

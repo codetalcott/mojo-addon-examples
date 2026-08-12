@@ -58,6 +58,6 @@ def gpu_double(n: Int) abi("C") -> Float32:
         ctx.enqueue_copy(host_dst, dev_dst)
         ctx.synchronize()
 
-        return host_dst.unsafe_ptr()[0]
+        return host_dst.unsafe_ptr()[unsafe_offset=0]
     except:
         return -2.0
