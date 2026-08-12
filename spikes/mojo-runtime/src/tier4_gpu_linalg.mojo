@@ -33,6 +33,6 @@ def gpu_matmul(m: Int, k: Int, n: Int) abi("C") -> Float32:
         ctx.enqueue_copy(host_c, dev_c)
         ctx.synchronize()
 
-        return host_c.unsafe_ptr()[0]
+        return host_c.unsafe_ptr()[unsafe_offset=0]
     except:
         return -2.0
