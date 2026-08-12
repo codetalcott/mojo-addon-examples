@@ -14,6 +14,13 @@
     "demo:image": "node examples/image/image.js",
     "build:hash": "bash examples/wyhash/build.sh",
     "build:all": "npm run build:matmul && npm run build:search && npm run build:stats && npm run build:image && npm run build:hash",
+    "build:matmul-cached": "bash examples/matmul/build_cached.sh",
+    "build:search-cached": "bash examples/simd-search/build_cached.sh",
+    "build:stats-cached": "bash examples/stats/build_cached.sh",
+    "build:image-cached": "bash examples/image/build_cached.sh",
+    "build:cached": "npm run build:matmul-cached && npm run build:search-cached && npm run build:stats-cached && npm run build:image-cached",
+    "build:retrieve": "bash packages/retrieve/build.sh",
+    "build:embed": "bash packages/embed/build.sh",
     "demo:hash": "node examples/wyhash/hash.js",
     "test": "node examples/matmul/test.js && node examples/simd-search/test.js && node examples/stats/test.js && node examples/image/test.js && node examples/wyhash/test.js"
   },

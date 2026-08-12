@@ -48,5 +48,29 @@ jobs:
       - name: Build all examples
         run: pixi run bash -c "npm run build:all"
 
+      # Compile-only coverage for the targets `build:all` misses. These are not
+      # tested here on purpose: every one of them is GPU-execution code, and
+      # neither runner can run it — ubuntu-latest has no NVIDIA GPU, and Metal
+      # inside the macos-latest VM is unproven. Their correctness gate is
+      # scripts/verify-all.sh locally and scripts/verify-gpu-h100.sh on a pod.
+      #
+      # Compiling them here still earns its keep: packages/retrieve sat
+      # uncompiled from Apr 17 to Aug 12 and silently missed an entire
+      # napi-mojo + Mojo 1.0.0 migration, because nothing in CI ever built it.
+      # This is also the only place the Linux/sm_90 cross-compile that ships to
+      # RunPod gets exercised — a Darwin laptop cannot produce it.
+      - name: Build cached variants (compile-only)
+        run: pixi run bash -c "npm run build:cached"
+
+      - name: Build packages/retrieve (compile-only)
+        run: pixi run bash -c "npm run build:retrieve"
+
+      # Ordered after retrieve to mirror the runtime dependency (embed loads
+      # retrieve into the same process), though the compile itself is
+      # standalone — src/lib.mojo imports its Python module at runtime, so this
+      # step needs no model weights and no GPU.
+      - name: Build packages/embed (compile-only)
+        run: pixi run bash -c "npm run build:embed"
+
       - name: Run smoke tests
         run: pixi run bash -c "npm test"

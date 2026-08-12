@@ -29,7 +29,9 @@ bash scripts/verify-all.sh
 bash scripts/verify-all.sh --skip-embed        # faster; skips the slowest build
 bash scripts/verify-all.sh --with-embed-test   # + embed roundtrip (needs weights)
 
-# Build everything under examples/ (one .node per example)
+# Build the five ONE-SHOT example addons. Despite the name this is not
+# everything — it excludes the four cached variants and both packages, which
+# have their own scripts below.
 npm run build:all
 
 # Single example (pattern: build:<name>, demo:<name>)
@@ -38,17 +40,16 @@ npm run demo:matmul
 pixi run bash examples/matmul/build.sh        # equivalent to build:matmul
 
 # Cached (persistent-buffer) variants live beside the one-shot builds
-pixi run bash examples/matmul/build_cached.sh
-pixi run bash examples/simd-search/build_cached.sh
-pixi run bash examples/stats/build_cached.sh
-pixi run bash examples/image/build_cached.sh
+npm run build:cached                          # all four
+npm run build:matmul-cached                   # or one at a time
+pixi run bash examples/matmul/build_cached.sh # equivalent
 
 # packages/retrieve — built and tested separately
-pixi run bash packages/retrieve/build.sh
+npm run build:retrieve                        # = bash packages/retrieve/build.sh
 (cd packages/retrieve && npm test)                 # Jest
 
 # packages/embed — built separately; depends on packages/retrieve being built first
-pixi run bash packages/retrieve/build.sh && pixi run bash packages/embed/build.sh
+npm run build:retrieve && npm run build:embed
 pixi run node packages/embed/test-roundtrip.js   # Gate F4 correctness
 pixi run node packages/embed/demo.js             # GPU end-to-end with packages/retrieve
 pixi run node packages/embed/bench.js            # MS-MARCO warm-path benchmarks
@@ -58,6 +59,10 @@ pixi run node packages/embed/bench.js            # MS-MARCO warm-path benchmarks
 # packages/embed, and touches no GPU code at all. It is also &&-chained, so it
 # stops at the first failing addon and hides the rest. Use verify-all.sh above
 # to actually verify the repo; `npm test` is the CI smoke subset.
+#
+# CI compiles the cached variants and both packages but does not test them —
+# they are all GPU-execution code and no hosted runner can run it. See
+# "CI coverage" below for where that line is drawn and why.
 npm test
 
 # Run a single example test directly
@@ -85,6 +90,22 @@ On Linux x86_64, builds add `--mcpu haswell` to avoid AVX-512 instructions that 
 ## Cloud benchmark infrastructure
 
 `scripts/runpod-launch.sh` + `scripts/bootstrap.sh` are the canonical path for H100 runs. Pods use a persistent Network Volume that caches pixi env + model weights so each session starts in ~30 s. `trap EXIT` in the launcher guarantees pod termination. See `docs/cloud-benchmark-runbook.md` for the ~30-minute reproduction flow (~$1/run). Phase-specific runners: `scripts/runpod-bench-3{b,c,d}.sh`.
+
+## CI coverage
+
+`.github/workflows/test.yml` runs on `ubuntu-latest` always, plus `macos-latest` on PRs to `main`. The repo is **public**, so standard-runner minutes are free and unmetered — the budget to protect is PR feedback latency, not dollars.
+
+CI **compiles everything** (`build:all`, `build:cached`, `build:retrieve`, `build:embed`) but **tests only `npm test`** — the five CPU-only `test.js` files. That split is a capability limit, not a cost decision:
+
+- Every uncovered test is GPU-execution: the four `test_cached.js` suites and `packages/retrieve`'s Jest.
+- `ubuntu-latest` has no NVIDIA GPU, so those cannot run there at all.
+- `macos-latest` is a VM whose Metal availability is unproven. Nothing in this repo has ever executed GPU code in CI — the five `test.js` files touch none.
+
+So GPU correctness is gated locally by `scripts/verify-all.sh` and on a pod by `scripts/verify-gpu-h100.sh`. **Prefer adding checks there over expanding CI.**
+
+Compile-only coverage still earns its place: `packages/retrieve` sat uncompiled from 2026-04-17 to 2026-08-12 and silently missed an entire napi-mojo + Mojo 1.0.0 migration, because nothing in CI ever built it. CI is also the only place the Linux/`sm_90` cross-compile that ships to RunPod is exercised — a Darwin laptop cannot produce that artifact.
+
+Docs-only changes skip CI entirely (`paths-ignore` covers `**.md` and `docs/**`).
 
 ## Architecture
 
