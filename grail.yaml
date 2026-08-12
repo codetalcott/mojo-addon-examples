@@ -1,0 +1,91 @@
+version: "1.0"
+domain:
+  name: "mojo-addon-examples"
+  description: "napi-mojo benchmark examples — build and test all addons"
+
+entities:
+  type: "examples"
+  discover:
+    type: glob
+    # `*/build.sh` matched nothing — every addon lives under examples/ — so no
+    # entities were discovered and example.built below was unevaluable rather
+    # than failing. The component the `*` matches is what becomes {entity}, so
+    # this yields wyhash / simd-search / image / matmul / stats: exactly the
+    # five that build:all builds. packages/{embed,rag} are deliberately out of
+    # scope — they are shipped packages, not benchmark examples, and build:all
+    # does not touch them.
+    pattern: "examples/*/build.sh"
+  context:
+    example_dir: "{cwd}/examples/{entity}"
+
+conditions:
+  - name: project.deps.installed
+    description: "napi-mojo dependency installed"
+    eval:
+      type: shell
+      cmd: "test -d node_modules/napi-mojo"
+      cwd: "{cwd}"
+
+  - name: project.build.passing
+    description: "All five addons compile"
+    eval:
+      type: shell
+      cmd: "npm run build:all"
+      cwd: "{cwd}"
+
+  - name: project.tests.passing
+    description: "All addon correctness tests pass"
+    eval:
+      type: shell
+      cmd: "npm test"
+      cwd: "{cwd}"
+
+  # `test -f` cannot take a glob: with no match it tests the literal pattern
+  # (false), and with several matches it gets too many arguments (also false).
+  # simd-search, image, matmul and stats each build two .node files, so this was
+  # wrong in both directions at once. `ls` handles both. The old
+  # {example_dir}/*.node branch was dead — every addon lands in <example>/build/.
+  - name: example.built
+    description: "Individual example addon compiled"
+    eval:
+      type: shell
+      cmd: "ls {example_dir}/build/*.node >/dev/null 2>&1"
+      cwd: "{cwd}"
+
+  - name: project.clean.workdir
+    description: "No uncommitted changes"
+    eval:
+      type: shell
+      cmd: "test -z \"$(git status --porcelain)\""
+      cwd: "{cwd}"
+
+affordances:
+  - name: install-deps
+    title: "Install Dependencies"
+    preconditions: []
+    effects: [project.deps.installed]
+    action:
+      type: shell
+      cmd: "npm install"
+      cwd: "{cwd}"
+    cost: 1
+
+  - name: build-all
+    title: "Build All Addons"
+    preconditions: [project.deps.installed]
+    effects: [project.build.passing, example.built]
+    action:
+      type: shell
+      cmd: "npm run build:all"
+      cwd: "{cwd}"
+    cost: 3
+
+  - name: run-tests
+    title: "Run All Tests"
+    preconditions: [project.build.passing]
+    effects: [project.tests.passing]
+    action:
+      type: shell
+      cmd: "npm test"
+      cwd: "{cwd}"
+    cost: 2
