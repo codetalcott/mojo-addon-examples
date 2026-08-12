@@ -22,6 +22,13 @@ The Mojo toolchain comes from pixi; Node scripts run under the pixi environment 
 npm install                      # install napi-mojo + JS deps
 pixi install                     # install Mojo/MAX
 
+# Verify EVERYTHING locally — the comprehensive gate, run this before pushing.
+# Builds all 11 targets (5 one-shot + 4 cached + rag + embed) and runs all 21
+# suites, including the GPU-execution tests that CI structurally cannot run.
+bash scripts/verify-all.sh
+bash scripts/verify-all.sh --skip-embed        # faster; skips the slowest build
+bash scripts/verify-all.sh --with-embed-test   # + embed roundtrip (needs weights)
+
 # Build everything under examples/ (one .node per example)
 npm run build:all
 
@@ -46,7 +53,11 @@ pixi run node packages/embed/test-roundtrip.js   # Gate F4 correctness
 pixi run node packages/embed/demo.js             # GPU end-to-end with packages/rag
 pixi run node packages/embed/bench.js            # MS-MARCO warm-path benchmarks
 
-# Correctness tests (root): runs all per-example test.js files
+# Correctness tests (root): the five per-example test.js files, CPU paths only.
+# NOT a full check — it skips every cached variant, packages/rag, and
+# packages/embed, and touches no GPU code at all. It is also &&-chained, so it
+# stops at the first failing addon and hides the rest. Use verify-all.sh above
+# to actually verify the repo; `npm test` is the CI smoke subset.
 npm test
 
 # Run a single example test directly
@@ -63,9 +74,11 @@ Each `build.sh` auto-selects a `--target-accelerator` and exposes an env var to 
 
 Override per addon:
 
-- `STATS_ACCEL`, `SEARCH_ACCEL`, `IMAGE_ACCEL`, `MATMUL_ACCEL` — per-example (empty string = CPU-only)
+- `STATS_ACCEL`, `SEARCH_ACCEL`, `IMAGE_ACCEL`, `MATMUL_ACCEL` — per-example
 - `QKSTAT_RAG_ACCEL` — for `packages/rag`
 - `EMBED_ACCEL` — for `packages/embed`
+
+**Setting these to the empty string does not give you a CPU-only build.** It only suppresses the `--target-accelerator` flag, and with that flag absent Mojo falls back to the *host* accelerator — on an M-series Mac, `mojo build --print-effective-target` reports `--target-accelerator metal:4-metal4`. There is no "no accelerator" flag. Any addon whose source contains GPU kernels therefore always invokes a GPU compiler, so on Darwin it needs the Metal Toolchain (see Notable constraints) no matter how these vars are set. `matmul/addon.mojo` and `wyhash/addon.mojo` are the only GPU-free sources in the repo; every other addon — including all four `addon_cached.mojo` variants — has GPU code. Use these vars to *retarget* a build (e.g. `sm_80` instead of `sm_90`), not to opt out of one.
 
 On Linux x86_64, builds add `--mcpu haswell` to avoid AVX-512 instructions that break on older runners (e.g. GitHub Actions). AVX-512 is still used at runtime on hosts that support it for Mojo's SIMD width selection — the `--mcpu` flag only constrains the baseline.
 
@@ -118,7 +131,7 @@ The repo root's `pixi.toml` includes `transformers`, `safetensors`, etc. specifi
 - **`pixi.lock` is git-ignored here** (`.gitignore`), so builds are not reproducible across machines from the repo alone — the pin in `pixi.toml` is the only record. napi-mojo tracks its lock deliberately: a lock-less bump there took its Nightly Canary down for two weeks. Worth reconsidering.
 - **`.last-good-nightly` is a hand-maintained note, not machinery.** Nothing in the repo reads or writes it — no script, workflow, or doc — so it drifts silently and has done so more than once. Despite the name it now records the last *verified toolchain*, nightly or stable (currently `26.5.0`, i.e. Mojo 1.0.0). **`pixi.toml` is the authoritative pin**; if the two ever disagree, `pixi.toml` is right.
 - **GPU kernel parameters must be fixed-width** (Mojo 26.6+). `Int`/`UInt` no longer conform to `DevicePassable`, so a kernel launched via `ctx.enqueue_function[...]` cannot take an `Int` size argument — it fails with `constraint failed: Int and UInt do not conform to DevicePassable`. Every kernel here takes its length as `Int64` and converts back with `var n = Int(n_i64)` on the first line of the body, which keeps the indexing logic unchanged. The host side (`enqueue_create_buffer`, `ceildiv`, grid math) is unaffected and still uses `Int`.
-- **Apple Silicon GPU benchmarks** require Xcode's Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`). Without it, GPU builds on Darwin fail at link time.
+- **Xcode's Metal Toolchain is required to build on Darwin at all** (`xcodebuild -downloadComponent MetalToolchain`, ~688 MB; check with `xcodebuild -showComponent MetalToolchain`). This is not benchmark-only: without it, every addon containing GPU kernels fails to *compile* (`error: Metal Compiler failed to compile metallib` / `failed to run the pass manager`) — not at link time, and with no way to opt out via the `*_ACCEL` vars (see GPU target flags). Only `matmul` and `wyhash` build without it, so a Mac missing this component silently ends up with stale `.node` files for everything else while `npm run build:all` still appears to make progress.
 - **MAX on M4 is currently CPU-only for `packages/embed`** — `Accelerator()` init returns "Not implemented for device: Apple M4". All embed GPU iteration happens on RunPod.
 - **Node version**: `engines.node >=22.12` in `packages/rag`. Root examples also assume that.
 - **Build outputs are git-ignored** (`build/*.node`, fixtures). Don't commit them.
