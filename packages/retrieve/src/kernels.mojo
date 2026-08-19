@@ -419,6 +419,11 @@ struct MatmulAsyncData(Movable):
     @__allow_legacy_any_origin_fields
     var state_ptr: Pointer[GpuState, MutAnyOrigin]
     var had_error: Bool
+    # Cached NapiBindings address, written by the entry callback on the main
+    # thread and read only by the complete callback (also main thread). Since
+    # napi-mojo 0.8.0 every framework call is Bindings-first, and a complete
+    # callback has no other way to reach them.
+    var bindings_addr: Int
 
     def __init__(
         out self,
@@ -440,6 +445,7 @@ struct MatmulAsyncData(Movable):
         self.dst_ptr = dst_ptr
         self.state_ptr = state_ptr
         self.had_error = False
+        self.bindings_addr = 0
 
     def __moveinit__(out self, deinit take: Self):
         self.deferred = take.deferred
@@ -452,6 +458,7 @@ struct MatmulAsyncData(Movable):
         self.dst_ptr = take.dst_ptr
         self.state_ptr = take.state_ptr
         self.had_error = take.had_error
+        self.bindings_addr = take.bindings_addr
 
 
 def matmul_async_execute(env: NapiEnv, data: OpaquePointer[MutAnyOrigin]):
@@ -471,27 +478,28 @@ def matmul_async_complete(
     env: NapiEnv, status: NapiStatus, data: OpaquePointer[MutAnyOrigin]
 ):
     var ptr = data.unsafe_bitcast[MatmulAsyncData]()
+    var b = Bindings(unsafe_from_address=ptr[].bindings_addr)
     try:
-        JsRef(ptr[].a_ref).delete(env)
+        JsRef(ptr[].a_ref).delete(b, env)
     except:
         pass
     try:
-        JsRef(ptr[].b_ref).delete(env)
+        JsRef(ptr[].b_ref).delete(b, env)
     except:
         pass
     try:
-        JsRef(ptr[].dst_ref).delete(env)
+        JsRef(ptr[].dst_ref).delete(b, env)
     except:
         pass
     try:
         if status == NAPI_OK and not ptr[].had_error:
-            var result_val = JsNumber.create(env, 0.0)
+            var result_val = JsNumber.create(b, env, 0.0)
             AsyncWork.resolve(
-                env, ptr[].deferred, ptr[].work, result_val.value
+                b, env, ptr[].deferred, ptr[].work, result_val.value
             )
         else:
             AsyncWork.reject_with_error(
-                env, ptr[].deferred, ptr[].work, "matmulHandleAsync failed"
+                b, env, ptr[].deferred, ptr[].work, "matmulHandleAsync failed"
             )
     except:
         pass
@@ -553,6 +561,7 @@ def matmul_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         )
         data_ptr[].deferred = aw.deferred
         data_ptr[].work = aw.work
+        data_ptr[].bindings_addr = Int(b)
         return aw.value
     except:
         throw_js_error(env, "matmulHandleAsync failed")
@@ -585,6 +594,8 @@ struct SearchAsyncData(Movable):
     var state_ptr: Pointer[GpuState, MutAnyOrigin]
     var k: Int
     var had_error: Bool
+    # See MatmulAsyncData.bindings_addr.
+    var bindings_addr: Int
 
     def __init__(
         out self,
@@ -612,6 +623,7 @@ struct SearchAsyncData(Movable):
         self.state_ptr = state_ptr
         self.k = k
         self.had_error = False
+        self.bindings_addr = 0
 
     def __moveinit__(out self, deinit take: Self):
         self.deferred = take.deferred
@@ -627,6 +639,7 @@ struct SearchAsyncData(Movable):
         self.state_ptr = take.state_ptr
         self.k = take.k
         self.had_error = take.had_error
+        self.bindings_addr = take.bindings_addr
 
 
 def search_async_execute(env: NapiEnv, data: OpaquePointer[MutAnyOrigin]):
@@ -648,31 +661,32 @@ def search_async_complete(
     env: NapiEnv, status: NapiStatus, data: OpaquePointer[MutAnyOrigin]
 ):
     var ptr = data.unsafe_bitcast[SearchAsyncData]()
+    var b = Bindings(unsafe_from_address=ptr[].bindings_addr)
     try:
-        JsRef(ptr[].a_ref).delete(env)
+        JsRef(ptr[].a_ref).delete(b, env)
     except:
         pass
     try:
-        JsRef(ptr[].b_ref).delete(env)
+        JsRef(ptr[].b_ref).delete(b, env)
     except:
         pass
     try:
-        JsRef(ptr[].idx_ref).delete(env)
+        JsRef(ptr[].idx_ref).delete(b, env)
     except:
         pass
     try:
-        JsRef(ptr[].scores_ref).delete(env)
+        JsRef(ptr[].scores_ref).delete(b, env)
     except:
         pass
     try:
         if status == NAPI_OK and not ptr[].had_error:
-            var result_val = JsNumber.create(env, 0.0)
+            var result_val = JsNumber.create(b, env, 0.0)
             AsyncWork.resolve(
-                env, ptr[].deferred, ptr[].work, result_val.value
+                b, env, ptr[].deferred, ptr[].work, result_val.value
             )
         else:
             AsyncWork.reject_with_error(
-                env, ptr[].deferred, ptr[].work, "searchHandleAsync failed"
+                b, env, ptr[].deferred, ptr[].work, "searchHandleAsync failed"
             )
     except:
         pass
@@ -759,6 +773,7 @@ def search_handle_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         )
         data_ptr[].deferred = aw.deferred
         data_ptr[].work = aw.work
+        data_ptr[].bindings_addr = Int(b)
         return aw.value
     except:
         throw_js_error(env, "searchHandleAsync failed")

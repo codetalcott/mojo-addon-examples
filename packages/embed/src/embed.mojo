@@ -134,6 +134,11 @@ struct EmbedAsyncData(Movable):
     var batch: Int
     var seq_len: Int
     var had_error: Bool
+    # Cached NapiBindings address, written by the entry callback on the main
+    # thread and read only by the complete callback (also main thread). Since
+    # napi-mojo 0.8.0 every framework call is Bindings-first, and a complete
+    # callback has no other way to reach them.
+    var bindings_addr: Int
 
     def __init__(
         out self,
@@ -157,6 +162,7 @@ struct EmbedAsyncData(Movable):
         self.batch = batch
         self.seq_len = seq_len
         self.had_error = False
+        self.bindings_addr = 0
 
     def __moveinit__(out self, deinit take: Self):
         self.deferred = take.deferred
@@ -170,6 +176,7 @@ struct EmbedAsyncData(Movable):
         self.batch = take.batch
         self.seq_len = take.seq_len
         self.had_error = take.had_error
+        self.bindings_addr = take.bindings_addr
 
 
 def embed_async_execute(env: NapiEnv, data: OpaquePointer[MutAnyOrigin]):
@@ -192,26 +199,28 @@ def embed_async_complete(
     env: NapiEnv, status: NapiStatus, data: OpaquePointer[MutAnyOrigin]
 ):
     var ptr = data.unsafe_bitcast[EmbedAsyncData]()
+    var b = Bindings(unsafe_from_address=ptr[].bindings_addr)
     try:
-        JsRef(ptr[].ids_ref).delete(env)
+        JsRef(ptr[].ids_ref).delete(b, env)
     except:
         pass
     try:
-        JsRef(ptr[].mask_ref).delete(env)
+        JsRef(ptr[].mask_ref).delete(b, env)
     except:
         pass
     try:
-        JsRef(ptr[].dst_ref).delete(env)
+        JsRef(ptr[].dst_ref).delete(b, env)
     except:
         pass
     try:
         if status == NAPI_OK and not ptr[].had_error:
-            var result_val = JsNumber.create(env, 0.0)
+            var result_val = JsNumber.create(b, env, 0.0)
             AsyncWork.resolve(
-                env, ptr[].deferred, ptr[].work, result_val.value
+                b, env, ptr[].deferred, ptr[].work, result_val.value
             )
         else:
             AsyncWork.reject_with_error(
+                b,
                 env,
                 ptr[].deferred,
                 ptr[].work,
@@ -285,6 +294,7 @@ def embed_tokens_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         )
         data_ptr[].deferred = aw.deferred
         data_ptr[].work = aw.work
+        data_ptr[].bindings_addr = Int(b)
         return aw.value
     except:
         throw_js_error(env, "embedTokensAsync failed")
