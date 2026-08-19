@@ -11,8 +11,7 @@
 from std.memory.alloc import unsafe_alloc
 from napi.types import NapiEnv, NapiValue
 from napi.bindings import NapiBindings, init_bindings
-from napi.raw import raw_create_error, raw_fatal_exception
-from napi.framework.js_string import JsString
+from napi.error import throw_js_error
 from napi.framework.register import ModuleBuilder
 from kernels import register_gpu_linalg
 
@@ -34,18 +33,9 @@ def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
         register_gpu_linalg(m, bindings_ptr.as_unsafe_any_origin())
         m.flush()
     except:
-        try:
-            var null_code = NapiValue(unsafe_from_address=Int(0))
-            var err_msg = JsString.create_literal(
-                env, "@qkstat/retrieve: register_module failed"
-            )
-            var err_val = NapiValue(unsafe_from_address=Int(0))
-            var err_ptr: OpaquePointer[MutAnyOrigin] = Pointer(
-                to=err_val
-            ).unsafe_bitcast[NoneType]().as_unsafe_any_origin()
-            _ = raw_create_error(env, null_code, err_msg.value, err_ptr)
-            _ = raw_fatal_exception(env, err_val)
-        except:
-            pass
+        # Leaves a pending JS error so require() throws with a real message.
+        # throw_js_error is env-only by design — it is the fallback for
+        # contexts where cached bindings could not be obtained.
+        throw_js_error(env, "@qkstat/retrieve: register_module failed")
 
     return exports
