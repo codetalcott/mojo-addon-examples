@@ -349,16 +349,26 @@ def _blur_parallel(
     var temp = unsafe_alloc[Byte](width * height * 4).as_unsafe_any_origin()
 
     # Horizontal pass: src → temp, parallelize across rows
-    var rows_per = height // NUM_WORKERS
     def h_worker(wid: Int) capturing:
+        # NOTE: derived inside the worker, not captured — the same idiom as the
+        # six other workers here, in stats and in simd-search. A post-computed
+        # scalar local read only from inside a parallelize closure is captured by
+        # reference, and on Linux x86_64 (dev2026072306) the worker read garbage
+        # through that slot; 863c58d has the forensics. Blur was the one site that
+        # never drew the "assignment to 'X' was never used" warning that flagged
+        # the others, so 863c58d deliberately left it alone. That warning only
+        # correlates with the miscompile, so it is the pattern — not the warning —
+        # that this avoids.
+        var rows_per = height // NUM_WORKERS
         var s = wid * rows_per
         var e = s + rows_per if wid < NUM_WORKERS - 1 else height
         _blur_horizontal_rows(src, temp, s, e, width, radius)
     parallelize_safe[h_worker](NUM_WORKERS)
 
     # Vertical pass: temp → dst, parallelize across columns
-    var cols_per = width // NUM_WORKERS
     def v_worker(wid: Int) capturing:
+        # NOTE: derived inside the worker, not captured — see h_worker above.
+        var cols_per = width // NUM_WORKERS
         var s = wid * cols_per
         var e = s + cols_per if wid < NUM_WORKERS - 1 else width
         _blur_vertical_cols(temp, dst, s, e, width, height, radius)
