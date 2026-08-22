@@ -1,6 +1,6 @@
 # Dockerfile — Multi-stage build for mojo-addon-examples demo
 #
-# Stage 1: Build Mojo addons (needs pixi + Mojo nightly)
+# Stage 1: Build Mojo addons (needs pixi + Mojo 1.0 stable)
 # Stage 2: Slim Node.js runtime with pre-built .node files
 
 # --- Stage 1: Builder -------------------------------------------------------
@@ -12,11 +12,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates git build-essential && \
+    curl ca-certificates git build-essential patchelf && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 20
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+# Install Node.js 22 (napi-mojo 0.13 requires >= 22.12)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs
 
 # Install pixi
@@ -32,7 +32,9 @@ COPY package.json package-lock.json ./
 RUN pixi install
 RUN npm ci
 
-# Copy source files
+# Copy source files (scripts/ holds the mojo-cc.sh compiler shim the npm
+# build scripts invoke via `napi-mojo build --mojo`)
+COPY scripts/ scripts/
 COPY matmul/ matmul/
 COPY simd-search/ simd-search/
 COPY stats/ stats/
@@ -44,7 +46,7 @@ RUN pixi run bash -c "npm run build:all"
 
 # --- Stage 2: Runtime --------------------------------------------------------
 
-FROM node:20-slim
+FROM node:22-slim
 
 WORKDIR /app
 
@@ -52,12 +54,16 @@ WORKDIR /app
 COPY demo/package.json demo/package-lock.json demo/
 RUN cd demo && npm ci --omit=dev 2>/dev/null || cd demo && npm install --omit=dev
 
-# Copy pre-built .node addon files from builder
-COPY --from=builder /app/matmul/build/matmul.node matmul/build/
-COPY --from=builder /app/simd-search/build/search.node simd-search/build/
-COPY --from=builder /app/stats/build/stats.node stats/build/
-COPY --from=builder /app/image/build/image.node image/build/
-COPY --from=builder /app/wyhash/build/wyhash.node wyhash/build/
+# Copy pre-built addons from the builder. The WHOLE build dir, not just the
+# .node: `napi-mojo build --bundle` puts the Mojo runtime libraries next to it
+# and rewrites the addon's RUNPATH to $ORIGIN. This image has no Mojo
+# toolchain, so without those siblings require() fails with
+# "libKGENCompilerRTShared.so: cannot open shared object file".
+COPY --from=builder /app/matmul/build/ matmul/build/
+COPY --from=builder /app/simd-search/build/ simd-search/build/
+COPY --from=builder /app/stats/build/ stats/build/
+COPY --from=builder /app/image/build/ image/build/
+COPY --from=builder /app/wyhash/build/ wyhash/build/
 
 # Copy JS files that addons are loaded through (require paths)
 COPY matmul/*.js matmul/

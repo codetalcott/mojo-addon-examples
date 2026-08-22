@@ -4,20 +4,23 @@
   "private": true,
   "description": "High-performance Node.js addon examples built with Mojo + napi-mojo",
   "scripts": {
-    "build:matmul": "bash matmul/build.sh",
+    "build:matmul": "napi-mojo build matmul/addon.mojo -o matmul/build/matmul.node --mojo scripts/mojo-cc.sh --bundle",
     "demo:matmul": "node matmul/matmul.js",
-    "build:search": "bash simd-search/build.sh",
+    "build:search": "napi-mojo build simd-search/addon.mojo -o simd-search/build/search.node --mojo scripts/mojo-cc.sh --bundle",
     "demo:search": "node simd-search/search.js",
-    "build:stats": "bash stats/build.sh",
+    "build:stats": "napi-mojo build stats/addon.mojo -o stats/build/stats.node --mojo scripts/mojo-cc.sh --bundle",
     "demo:stats": "node stats/stats.js",
-    "build:image": "bash image/build.sh",
+    "build:image": "napi-mojo build image/addon.mojo -o image/build/image.node --mojo scripts/mojo-cc.sh --bundle",
     "demo:image": "node image/image.js",
-    "build:hash": "bash wyhash/build.sh",
+    "build:hash": "napi-mojo build wyhash/addon.mojo -o wyhash/build/wyhash.node --mojo scripts/mojo-cc.sh --bundle",
     "build:all": "npm run build:matmul && npm run build:search && npm run build:stats && npm run build:image && npm run build:hash",
     "demo:hash": "node wyhash/hash.js",
     "test": "node matmul/test.js && node simd-search/test.js && node stats/test.js && node image/test.js && node wyhash/test.js"
   },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "dependencies": {
-    "napi-mojo": "^0.2.5"
+    "napi-mojo": "^0.13.0"
   }
 }

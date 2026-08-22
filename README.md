@@ -4,15 +4,11 @@ High-performance Node.js addon examples built with [napi-mojo](https://github.co
 
 ## Examples
 
+All figures are speedups over pure JavaScript, measured on an M4 Mac.
+
 ### Matrix Multiply — Progressive Optimization
 
-Four implementations showing Mojo's optimization story, from naive triple loop to SIMD + tiled + parallel:
-
-```
-node matmul/matmul.js
-```
-
-**Results (M4 Mac, Float64):**
+Four implementations showing Mojo's optimization story, from naive triple loop to SIMD + tiled + parallel. Run with `npm run demo:matmul`.
 
 | Step | 1024x1024 | 2048x2048 | Mojo Feature |
 |------|-----------|-----------|-------------|
@@ -24,13 +20,7 @@ node matmul/matmul.js
 
 ### SIMD Text Search — Byte-Level Pattern Matching
 
-SIMD byte scanning that's impossible to express in pure JavaScript. Three functions: `countByte`, `countLines`, `searchAll` (single and multi-byte patterns).
-
-```
-node simd-search/search.js
-```
-
-**Results (M4 Mac, Buffer/Uint8Array):**
+SIMD byte scanning that's impossible to express in pure JavaScript. Three functions: `countByte`, `countLines`, `searchAll` (single and multi-byte patterns). Run with `npm run demo:search`.
 
 | Function | 1MB | 16MB | 100MB | Mojo Feature |
 |----------|-----|------|-------|-------------|
@@ -41,13 +31,7 @@ node simd-search/search.js
 
 ### Statistics — SIMD Aggregation
 
-Compute `{mean, stddev, min, max, p50, p95, p99}` on Float64Arrays in a single call. SIMD reductions + parallel accumulation + quickselect percentiles.
-
-```
-node stats/stats.js
-```
-
-**Results (M4 Mac, Float64):**
+Compute `{mean, stddev, min, max, p50, p95, p99}` on Float64Arrays in a single call. SIMD reductions + parallel accumulation + quickselect percentiles. Run with `npm run demo:stats`.
 
 | Function | 100K | 1M | 10M | Mojo Feature |
 |----------|------|-----|-----|-------------|
@@ -56,13 +40,7 @@ node stats/stats.js
 
 ### Image Processing — Pixel Operations
 
-Four RGBA pixel operations on Uint8Arrays: `grayscale`, `brightness`, `threshold`, `blur`. Integer-approximation grayscale, fixed-point brightness, separable box blur with parallel horizontal + vertical passes.
-
-```
-node image/image.js
-```
-
-**Results (M4 Mac, RGBA Uint8Array):**
+Four RGBA pixel operations on Uint8Arrays: `grayscale`, `brightness`, `threshold`, `blur`. Integer-approximation grayscale, fixed-point brightness, separable box blur with parallel horizontal + vertical passes. Run with `npm run demo:image`.
 
 | Function | 720p | 1080p | 4K | Mojo Feature |
 |----------|------|-------|-----|-------------|
@@ -73,13 +51,7 @@ node image/image.js
 
 ### wyhash — Fast Non-Cryptographic Hash
 
-Match C hash performance in ~50 lines of Mojo. `wyHash` returns BigInt (full 64-bit), `wyHash64` returns Number (lossy but no BigInt allocation overhead). The speed comes from 128-bit folded multiplies via Mojo's native `DType.uint128`.
-
-```
-node wyhash/hash.js
-```
-
-**Results (M4 Mac, Buffer):**
+Match C hash performance in ~50 lines of Mojo. `wyHash` returns BigInt (full 64-bit), `wyHash64` returns Number (lossy but no BigInt allocation overhead). The speed comes from 128-bit folded multiplies via Mojo's native `DType.uint128`. Run with `npm run demo:hash`.
 
 | Function | 1KB | 64KB | 1MB | 16MB | Mojo Feature |
 |----------|-----|------|-----|------|-------------|
@@ -90,37 +62,28 @@ See [ROADMAP.md](ROADMAP.md) for the full project roadmap.
 
 ## When to Use Mojo
 
-V8's JIT compiler is already fast for scalar code. The matmul example shows this clearly: Mojo with the *same algorithm* is only 1.9-2.2x faster. A native addon has real costs -- build toolchain, N-API call overhead, platform-specific binaries. Mojo is worth reaching for when:
+V8's JIT is already fast for scalar code — Mojo running the *same algorithm* is only 1.9-2.2x faster, and a native addon costs you a build toolchain, N-API call overhead, and platform-specific binaries. Mojo is worth reaching for when:
 
-**The data is large and the work is data-parallel.** Speedups scale with input size across every example: wyhash is 3.7x at 1KB but 66x at 16MB. countByte is 19x at 1MB but 68x at 100MB. If your hot loop processes a TypedArray or Buffer with thousands of elements, Mojo's SIMD `vectorize()` can process 2-8 elements per instruction where V8 processes one.
+**The data is large and the work is data-parallel.** Speedups scale with input size across every example above. Mojo's SIMD `vectorize()` processes 2-8 elements per instruction where V8 processes one.
 
-**You need multi-core parallelism.** V8 is single-threaded. Worker threads exist but require serialization overhead. Mojo's `parallelize()` distributes work across cores with zero-copy shared memory. The matmul example jumps from 15x (SIMD only) to 91x (SIMD + parallel) by adding one line.
+**You need multi-core parallelism.** V8 is single-threaded, and worker threads require serialization overhead. Mojo's `parallelize()` distributes work across cores with zero-copy shared memory — matmul goes from 15x to 91x by adding one line.
 
-**The operation can't be expressed in JS.** Byte-level SIMD (XOR + reduce for pattern matching), 128-bit integer arithmetic (wyhash's folded multiply), and fixed-point pixel math all require bit-width control that JavaScript doesn't offer. These aren't just faster -- they're impossible to write in JS at all.
+**The operation can't be expressed in JS.** Byte-level SIMD, 128-bit integer arithmetic, and fixed-point pixel math all need bit-width control JavaScript doesn't offer. These aren't just faster — they're impossible to write in JS at all.
 
 **When NOT to use Mojo:** String manipulation, JSON parsing, I/O-bound work, small payloads where N-API call overhead dominates, or anything V8 already JIT-compiles well. If your function runs in under ~1ms on typical input, the native call overhead likely isn't worth it.
 
-## Prerequisites
-
-- [pixi](https://prefix.dev/docs/pixi/) with Mojo nightly
-- Node.js 18+
-
 ## Quick Start
+
+Requires [pixi](https://prefix.dev/docs/pixi/), which provides the pinned Mojo toolchain, and Node.js 22.12+.
 
 ```bash
 npm install
 pixi install
-
-# Build all examples
 npm run build:all
-
-# Run benchmarks
-node matmul/matmul.js
-node simd-search/search.js
-node stats/stats.js
-node image/image.js
-node wyhash/hash.js
+npm test
 ```
+
+Then run any of the demos listed above.
 
 ## Development
 
@@ -131,4 +94,4 @@ cd /path/to/napi-mojo && npm link
 cd /path/to/mojo-addon-examples && npm link napi-mojo
 ```
 
-This replaces the npm-installed package with a symlink to your local checkout. Run `npm install` to revert back to the published package.
+Run `npm install` to revert to the published package.

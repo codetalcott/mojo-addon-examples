@@ -4,10 +4,11 @@
 ##   1. wyHash(buf, seed?)    → BigInt (full 64-bit hash)
 ##   2. wyHash64(buf, seed?)  → Number (lossy Float64, no BigInt overhead)
 ##
-## Build:  pixi run bash wyhash/build.sh
+## Build:  npm run build:hash
 ## Run:    node wyhash/hash.js
 
-from std.memory import bitcast, alloc
+from std.memory import bitcast
+from std.memory.alloc import unsafe_alloc
 
 from napi.types import NapiEnv, NapiValue, NAPI_TYPE_NUMBER, NAPI_TYPE_BIGINT
 from napi.error import throw_js_error
@@ -31,31 +32,35 @@ comptime _WYP3: UInt64 = 0x589965cc75374cc3
 
 # --- Core primitives ---------------------------------------------------------
 
-fn _wymum(a: UInt64, b: UInt64) -> UInt64:
+def _wymum(a: UInt64, b: UInt64) -> UInt64:
     """128-bit folded multiply: (a * b) as 128-bit, return lo XOR hi."""
     var m = a.cast[DType.uint128]() * b.cast[DType.uint128]()
     var parts = bitcast[DType.uint64, 2](m)
     return parts[0] ^ parts[1]
 
 
-fn _wyr8(p: UnsafePointer[Byte, MutAnyOrigin], offset: Int) -> UInt64:
+def _wyr8(p: Pointer[Byte, MutAnyOrigin], offset: Int) -> UInt64:
     """Read 8 bytes as little-endian UInt64."""
-    return (p + offset).bitcast[UInt64]()[]
+    return p.unsafe_offset(offset).unsafe_bitcast[UInt64]()[unsafe_offset=0]
 
 
-fn _wyr4(p: UnsafePointer[Byte, MutAnyOrigin], offset: Int) -> UInt64:
+def _wyr4(p: Pointer[Byte, MutAnyOrigin], offset: Int) -> UInt64:
     """Read 4 bytes as little-endian UInt32, zero-extend to UInt64."""
-    return UInt64((p + offset).bitcast[UInt32]()[])
+    return UInt64(p.unsafe_offset(offset).unsafe_bitcast[UInt32]()[unsafe_offset=0])
 
 
-fn _wyr3(p: UnsafePointer[Byte, MutAnyOrigin], k: Int, length: Int) -> UInt64:
+def _wyr3(p: Pointer[Byte, MutAnyOrigin], k: Int, length: Int) -> UInt64:
     """Read 1-3 bytes into a UInt64."""
-    return (UInt64(p[k]) << 16) | (UInt64(p[k + (length >> 1)]) << 8) | UInt64(p[k + length - 1])
+    return (
+        (UInt64(p[unsafe_offset=k]) << 16)
+        | (UInt64(p[unsafe_offset= k + (length >> 1)]) << 8)
+        | UInt64(p[unsafe_offset= k + length - 1])
+    )
 
 
 # --- wyhash main function ----------------------------------------------------
 
-fn wyhash(data: UnsafePointer[Byte, MutAnyOrigin], length: Int, in_seed: UInt64) -> UInt64:
+def wyhash(data: Pointer[Byte, MutAnyOrigin], length: Int, in_seed: UInt64) -> UInt64:
     var seed = in_seed ^ _wymum(in_seed ^ _WYP0, _WYP1)
     var a: UInt64 = 0
     var b: UInt64 = 0
@@ -103,14 +108,14 @@ fn wyhash(data: UnsafePointer[Byte, MutAnyOrigin], length: Int, in_seed: UInt64)
 
 # --- Helper: get byte pointer + length from Buffer or Uint8Array -------------
 
-fn _get_data_ptr(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UnsafePointer[Byte, MutAnyOrigin]:
+def _get_data_ptr(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Pointer[Byte, MutAnyOrigin]:
     if JsBuffer.is_buffer(b, env, val):
         return JsBuffer(val).data_ptr(b, env)
     if JsTypedArray.is_typedarray(b, env, val):
         return JsTypedArray(val).data_ptr(b, env)
     raise Error("expected Buffer or Uint8Array")
 
-fn _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
+def _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
     if JsBuffer.is_buffer(b, env, val):
         return Int(JsBuffer(val).length(b, env))
     if JsTypedArray.is_typedarray(b, env, val):
@@ -120,7 +125,7 @@ fn _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
 
 # --- Read seed argument (Number or BigInt, default 0) -------------------------
 
-fn _read_seed(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UInt64:
+def _read_seed(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UInt64:
     var t = js_typeof(b, env, val)
     if t == NAPI_TYPE_NUMBER:
         return UInt64(Int64(JsNumber.from_napi_value(b, env, val)))
@@ -130,9 +135,12 @@ fn _read_seed(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UInt64:
 
 
 # --- N-API callbacks ----------------------------------------------------------
+# The except block must THROW before returning. A null napi_value with no
+# pending exception is read by N-API as `undefined`, so the Mojo Error would
+# vanish and JS would see a successful call that quietly produced nothing.
 
-fn wy_hash_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
-    """wyHash(buf, seed?) → BigInt"""
+def wy_hash_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+    """Hash a Buffer, returning the full 64-bit result as a JS `BigInt`."""
     try:
         var bindings = CbArgs.get_bindings(env, info)
         var argc = CbArgs.argc(bindings, env, info)
@@ -147,11 +155,11 @@ fn wy_hash_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsBigInt.from_uint64(bindings, env, result).value
     except:
         throw_js_error(env, "wyHash failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
-fn wy_hash64_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
-    """wyHash64(buf, seed?) → Number (lossy Float64)"""
+def wy_hash64_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+    """Hash a Buffer, returning a lossy `Float64` JS `Number`."""
     try:
         var bindings = CbArgs.get_bindings(env, info)
         var argc = CbArgs.argc(bindings, env, info)
@@ -166,22 +174,23 @@ fn wy_hash64_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(bindings, env, Float64(result)).value
     except:
         throw_js_error(env, "wyHash64 failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- Module entry point -------------------------------------------------------
 
-@export("napi_register_module_v1", ABI="C")
-fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
-    var bindings_ptr = alloc[NapiBindings](1)
+@export("napi_register_module_v1")
+def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
+    var bindings_ptr = unsafe_alloc[NapiBindings](1)
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
-        bindings_ptr.init_pointee_move(bindings^)
+        bindings_ptr.unsafe_write(bindings^)
     except:
-        bindings_ptr.free()
+        bindings_ptr.unsafe_free()
+        throw_js_error(env, "wyhash: failed to resolve N-API symbols")
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]()
+    var cb_data = bindings_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin()
 
     var wh_ref = wy_hash_fn
     var wh64_ref = wy_hash64_fn
@@ -192,6 +201,6 @@ fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
         m.method("wyHash64", fn_ptr(wh64_ref))
         m.flush()
     except:
-        pass
+        throw_js_error(env, "wyhash: failed to register exports")
 
     return exports

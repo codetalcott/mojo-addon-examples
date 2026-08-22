@@ -21,6 +21,6 @@ Accepts `Buffer`, `Uint8Array`, and optional seed as `Number` or `BigInt`.
 ## Build & Run
 
 ```bash
-pixi run bash wyhash/build.sh
+npm run build:hash
 node wyhash/hash.js
 ```

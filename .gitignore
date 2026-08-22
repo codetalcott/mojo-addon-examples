@@ -6,3 +6,4 @@ build/
 .pixi/
 .claude/
 .fly/
+.DS_Store

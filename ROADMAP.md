@@ -92,7 +92,6 @@ Each example is self-contained:
 example-name/
   addon.mojo          # Mojo source (SIMD kernels + N-API callbacks)
   example.js           # Demo + benchmark script
-  build.sh             # Build script (compile .mojo -> .node)
   README.md            # Example-specific docs + benchmark results
 ```
 
@@ -100,14 +99,27 @@ All examples depend on napi-mojo for the N-API framework (`napi.types`, `napi.fr
 
 ### Common Patterns
 
-- **Zero-copy TypedArray access:** `JsTypedArray.data_ptr(env).bitcast[Float64]()` reads JS memory directly
-- **SIMD vectorize:** `vectorize[simd_width_of[DType.float64]()](size, compute)` with `unified {mut}` closure
-- **Multi-core parallel:** `parallelize[worker](num_workers)` with `capturing` closure
-- **Runtime init:** `KGEN_CompilerRT_AsyncRT_CreateRuntime` via `OwnedDLHandle()` for parallelize in shared libs
+- **Zero-copy TypedArray access:** `JsTypedArray.data_ptr_float64(b, env)` reads JS memory
+  directly and verifies the array's element type; `data_ptr(b, env)` is the untyped form
+- **SIMD vectorize:** `vectorize[simd_width_of[DType.float64]()](size, compute)` with an
+  explicit capture list — `def compute[width: Int](i: Int) {mut acc, imm data}:`
+- **Multi-core parallel:** `parallelize_safe[worker](num_workers)` with a `capturing`
+  closure. Prefer it over `parallelize`: it auto-initializes the async runtime and falls
+  back to a sequential loop, where bare `parallelize` on an uninitialized runtime
+  SIGSEGVs the host Node process
+- **Runtime init:** `init_async_runtime()` (delegates to `std.runtime.initialize_runtime()`)
+
+> **Do not let a `capturing` worker read a `var` local that is used only inside it.**
+> Such a local is invisible to the compiler's liveness analysis, so its store can be
+> eliminated and the closure then reads a garbage stack slot — a SIGBUS once the
+> parallel branch is taken. The compiler flags it as
+> `warning: assignment to '<name>' was never used`; treat that as an error, not noise.
+> Compute split indices from the enclosing function's *parameters* inside the worker.
+> (Explicit capture lists, as used by `vectorize`, are tracked correctly and are fine.)
 
 ### Build
 
 ```bash
-pixi run bash example-name/build.sh
+npm run build:<example>
 node example-name/example.js
 ```

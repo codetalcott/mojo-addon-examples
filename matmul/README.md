@@ -26,6 +26,6 @@ All operate on row-major `Float64Array`s. JS passes pre-allocated output buffer 
 ## Build & Run
 
 ```bash
-pixi run bash matmul/build.sh
+npm run build:matmul
 node matmul/matmul.js
 ```

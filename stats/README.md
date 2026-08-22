@@ -19,6 +19,6 @@ Compute `{mean, stddev, min, max, p50, p95, p99}` on Float64Arrays in a single N
 ## Build & Run
 
 ```bash
-pixi run bash stats/build.sh
+npm run build:stats
 node stats/stats.js
 ```

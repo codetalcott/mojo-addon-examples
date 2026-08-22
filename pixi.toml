@@ -1,11 +1,13 @@
 [workspace]
 authors = ["Wm Talcott <wtalcott@gmail.com>"]
-channels = ["conda-forge", "https://conda.modular.com/max-nightly/"]
+channels = ["conda-forge", "https://conda.modular.com/max/"]
 name = "mojo-addon-examples"
-platforms = ["osx-arm64", "linux-64"]
+platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
 version = "0.1.0"
 
 [tasks]
 
 [dependencies]
-mojo = "==0.26.3.0.dev2026031215"
+# Mojo 1.0.0 (stable). Must match the pin in napi-mojo's own pixi.toml — the
+# framework ships Mojo source that these addons compile against.
+max = "==26.5.0"

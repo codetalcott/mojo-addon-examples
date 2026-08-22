@@ -24,6 +24,6 @@ Accepts both `Buffer` and `Uint8Array` inputs. Multi-byte `searchAll` uses a fir
 ## Build & Run
 
 ```bash
-pixi run bash simd-search/build.sh
+npm run build:search
 node simd-search/search.js
 ```

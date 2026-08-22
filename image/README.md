@@ -25,6 +25,6 @@ All return a new `Uint8Array` and preserve the alpha channel.
 ## Build & Run
 
 ```bash
-pixi run bash image/build.sh
+npm run build:image
 node image/image.js
 ```

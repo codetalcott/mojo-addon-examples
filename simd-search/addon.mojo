@@ -5,12 +5,12 @@
 ##   2. countLines(buf)           — count newlines (wc -l equivalent)
 ##   3. searchAll(buf, needle)    — all match positions → Uint32Array
 ##
-## Build:  pixi run bash simd-search/build.sh
+## Build:  npm run build:search
 ## Run:    node simd-search/search.js
 
-from std.algorithm.functional import vectorize, parallelize
+from std.algorithm.functional import vectorize
 from std.sys import simd_width_of
-from std.memory import alloc
+from std.memory.alloc import unsafe_alloc
 
 from napi.types import NapiEnv, NapiValue
 from napi.error import throw_js_error
@@ -22,19 +22,19 @@ from napi.framework.js_typedarray import JsTypedArray
 from napi.framework.js_arraybuffer import JsArrayBuffer
 from napi.framework.args import CbArgs
 from napi.framework.register import fn_ptr, ModuleBuilder
-from napi.framework.runtime import init_async_runtime
+from napi.framework.runtime import init_async_runtime, parallelize_safe
 
 
 # --- Helper: get byte pointer + length from Buffer or Uint8Array -------------
 
-fn _get_data_ptr(b: Bindings, env: NapiEnv, val: NapiValue) raises -> UnsafePointer[Byte, MutAnyOrigin]:
+def _get_data_ptr(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Pointer[Byte, MutAnyOrigin]:
     if JsBuffer.is_buffer(b, env, val):
         return JsBuffer(val).data_ptr(b, env)
     if JsTypedArray.is_typedarray(b, env, val):
         return JsTypedArray(val).data_ptr(b, env)
     raise Error("expected Buffer or Uint8Array")
 
-fn _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
+def _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
     if JsBuffer.is_buffer(b, env, val):
         return Int(JsBuffer(val).length(b, env))
     if JsTypedArray.is_typedarray(b, env, val):
@@ -55,7 +55,7 @@ fn _get_data_len(b: Bindings, env: NapiEnv, val: NapiValue) raises -> Int:
 #
 # This avoids per-byte branching and runs entirely in SIMD registers.
 
-fn _simd_count_matches[width: Int](chunk: SIMD[DType.uint8, width], target: Byte) -> Int:
+def _simd_count_matches[width: Int](chunk: SIMD[DType.uint8, width], target: Byte) -> Int:
     var xored = chunk ^ SIMD[DType.uint8, width](target)
     var collapsed = xored | (xored >> 1) | (xored >> 2) | (xored >> 3) | (xored >> 4) | (xored >> 5) | (xored >> 6) | (xored >> 7)
     var non_match = collapsed & SIMD[DType.uint8, width](1)
@@ -67,66 +67,74 @@ fn _simd_count_matches[width: Int](chunk: SIMD[DType.uint8, width], target: Byte
 comptime PARALLEL_THRESHOLD = 65536  # 64KB
 comptime NUM_WORKERS = 4
 
-fn _count_byte_range(
-    data: UnsafePointer[Byte, MutAnyOrigin],
+def _count_byte_range(
+    data: Pointer[Byte, MutAnyOrigin],
     target: Byte,
     start: Int,
     end: Int,
 ) -> Int:
     var count: Int = 0
-    var base = start
-    fn compute[width: Int](offset: Int) unified {mut}:
-        var chunk = data.load[width=width](base + offset)
+
+    def compute[width: Int](offset: Int) {mut count, imm data, imm target, imm start}:
+        var chunk = data.unsafe_load[width=width](start + offset)
         count += _simd_count_matches(chunk, target)
+
     vectorize[simd_width_of[DType.uint8]()](end - start, compute)
     return count
 
 
-fn _count_byte(
-    data: UnsafePointer[Byte, MutAnyOrigin],
+def _count_byte(
+    data: Pointer[Byte, MutAnyOrigin],
     target: Byte,
     size: Int,
 ) -> Int:
     if size < PARALLEL_THRESHOLD:
         return _count_byte_range(data, target, 0, size)
-    var chunk_size = size // NUM_WORKERS
-    var partials = alloc[Int](NUM_WORKERS)
-    fn worker(wid: Int) capturing:
+    var partials = unsafe_alloc[Int](NUM_WORKERS)
+
+    # chunk_size is recomputed INSIDE the worker on purpose. A `var` local read
+    # only from an implicit `capturing` closure is invisible to the compiler's
+    # liveness analysis, so its store can be eliminated and the closure then
+    # reads a garbage stack slot. Capture parameters (data, target, size) and
+    # locals that are also read after the closure (partials) only.
+    def worker(wid: Int) capturing:
+        var chunk_size = size // NUM_WORKERS
         var s = wid * chunk_size
         var e = s + chunk_size if wid < NUM_WORKERS - 1 else size
-        partials[wid] = _count_byte_range(data, target, s, e)
-    parallelize[worker](NUM_WORKERS)
+        partials[unsafe_offset=wid] = _count_byte_range(data, target, s, e)
+
+    parallelize_safe[worker](NUM_WORKERS)
     var total: Int = 0
     for i in range(NUM_WORKERS):
-        total += partials[i]
-    partials.free()
+        total += partials[unsafe_offset=i]
+    partials.unsafe_free()
     return total
 
 
 # --- SIMD position collection ------------------------------------------------
 
-fn _collect_byte_positions(
-    data: UnsafePointer[Byte, MutAnyOrigin],
+def _collect_byte_positions(
+    data: Pointer[Byte, MutAnyOrigin],
     target: Byte,
     size: Int,
-    result: UnsafePointer[UInt32, MutAnyOrigin],
+    result: Pointer[UInt32, MutAnyOrigin],
 ) -> Int:
     var idx: Int = 0
     comptime sw = simd_width_of[DType.uint8]()
     var full_chunks = size // sw
     for chunk_i in range(full_chunks):
         var offset = chunk_i * sw
-        var chunk = data.load[width=sw](offset)
+        var chunk = data.unsafe_load[width=sw](offset)
         var xored = chunk ^ SIMD[DType.uint8, sw](target)
         for lane in range(sw):
             if xored[lane] == 0:
-                result[idx] = UInt32(offset + lane)
+                result[unsafe_offset=idx] = UInt32(offset + lane)
                 idx += 1
     # Scalar tail
     var tail_start = full_chunks * sw
     for i in range(tail_start, size):
-        if data[i] == target:
-            result[idx] = UInt32(i)
+        if data[unsafe_offset=i] == target:
+            result[unsafe_offset=idx] = UInt32(i)
             idx += 1
     return idx
 
@@ -143,24 +151,24 @@ fn _collect_byte_positions(
 # This eliminates most non-matching positions in bulk via SIMD, then only does
 # expensive byte-by-byte comparison on the rare candidates that pass the filter.
 
-fn _count_multi_byte(
-    data: UnsafePointer[Byte, MutAnyOrigin],
-    needle: UnsafePointer[Byte, MutAnyOrigin],
+def _count_multi_byte(
+    data: Pointer[Byte, MutAnyOrigin],
+    needle: Pointer[Byte, MutAnyOrigin],
     data_len: Int,
     needle_len: Int,
 ) -> Int:
     if needle_len == 0 or needle_len > data_len:
         return 0
-    var first = needle[0]
-    var last = needle[needle_len - 1]
+    var first = needle[unsafe_offset=0]
+    var last = needle[unsafe_offset= needle_len - 1]
     var search_len = data_len - needle_len + 1
     var count: Int = 0
     comptime sw = simd_width_of[DType.uint8]()
     var full_chunks = search_len // sw
     for chunk_i in range(full_chunks):
         var offset = chunk_i * sw
-        var first_xor = data.load[width=sw](offset) ^ SIMD[DType.uint8, sw](first)
-        var last_xor = data.load[width=sw](offset + needle_len - 1) ^ SIMD[DType.uint8, sw](last)
+        var first_xor = data.unsafe_load[width=sw](offset) ^ SIMD[DType.uint8, sw](first)
+        var last_xor = data.unsafe_load[width=sw](offset + needle_len - 1) ^ SIMD[DType.uint8, sw](last)
         # candidate where both XOR == 0 (both first and last byte match)
         var combined = first_xor | last_xor  # 0 only where both match
         for lane in range(sw):
@@ -168,7 +176,7 @@ fn _count_multi_byte(
                 var pos = offset + lane
                 var found = True
                 for k in range(1, needle_len - 1):
-                    if data[pos + k] != needle[k]:
+                    if data[unsafe_offset= pos + k] != needle[unsafe_offset=k]:
                         found = False
                         break
                 if found:
@@ -178,7 +186,7 @@ fn _count_multi_byte(
     for i in range(tail_start, search_len):
         var found = True
         for k in range(needle_len):
-            if data[i + k] != needle[k]:
+            if data[unsafe_offset= i + k] != needle[unsafe_offset=k]:
                 found = False
                 break
         if found:
@@ -186,54 +194,54 @@ fn _count_multi_byte(
     return count
 
 
-fn _collect_multi_byte(
-    data: UnsafePointer[Byte, MutAnyOrigin],
-    needle: UnsafePointer[Byte, MutAnyOrigin],
+def _collect_multi_byte(
+    data: Pointer[Byte, MutAnyOrigin],
+    needle: Pointer[Byte, MutAnyOrigin],
     data_len: Int,
     needle_len: Int,
-    result: UnsafePointer[UInt32, MutAnyOrigin],
+    result: Pointer[UInt32, MutAnyOrigin],
 ) -> Int:
     if needle_len == 0 or needle_len > data_len:
         return 0
-    var first = needle[0]
-    var last = needle[needle_len - 1]
+    var first = needle[unsafe_offset=0]
+    var last = needle[unsafe_offset= needle_len - 1]
     var search_len = data_len - needle_len + 1
     var idx: Int = 0
     comptime sw = simd_width_of[DType.uint8]()
     var full_chunks = search_len // sw
     for chunk_i in range(full_chunks):
         var offset = chunk_i * sw
-        var first_xor = data.load[width=sw](offset) ^ SIMD[DType.uint8, sw](first)
-        var last_xor = data.load[width=sw](offset + needle_len - 1) ^ SIMD[DType.uint8, sw](last)
+        var first_xor = data.unsafe_load[width=sw](offset) ^ SIMD[DType.uint8, sw](first)
+        var last_xor = data.unsafe_load[width=sw](offset + needle_len - 1) ^ SIMD[DType.uint8, sw](last)
         var combined = first_xor | last_xor
         for lane in range(sw):
             if combined[lane] == 0:
                 var pos = offset + lane
                 var found = True
                 for k in range(1, needle_len - 1):
-                    if data[pos + k] != needle[k]:
+                    if data[unsafe_offset= pos + k] != needle[unsafe_offset=k]:
                         found = False
                         break
                 if found:
-                    result[idx] = UInt32(pos)
+                    result[unsafe_offset=idx] = UInt32(pos)
                     idx += 1
     # Scalar tail
     var tail_start = full_chunks * sw
     for i in range(tail_start, search_len):
         var found = True
         for k in range(needle_len):
-            if data[i + k] != needle[k]:
+            if data[unsafe_offset= i + k] != needle[unsafe_offset=k]:
                 found = False
                 break
         if found:
-            result[idx] = UInt32(i)
+            result[unsafe_offset=idx] = UInt32(i)
             idx += 1
     return idx
 
 
 # --- N-API callbacks ----------------------------------------------------------
 
-fn count_byte_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def count_byte_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var r = CbArgs.get_bindings_and_two(env, info)
         var b = r.b
@@ -244,10 +252,10 @@ fn count_byte_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, Float64(count)).value
     except:
         throw_js_error(env, "countByte failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
-fn count_lines_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def count_lines_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var r = CbArgs.get_bindings_and_one(env, info)
         var b = r.b
@@ -257,10 +265,10 @@ fn count_lines_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         return JsNumber.create(b, env, Float64(count)).value
     except:
         throw_js_error(env, "countLines failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
-fn search_all_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
+def search_all_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var r = CbArgs.get_bindings_and_two(env, info)
         var b = r.b
@@ -272,7 +280,7 @@ fn search_all_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         # Count matches first to allocate exact-size result
         var match_count: Int
         if n_len == 1:
-            match_count = _count_byte(h_ptr, n_ptr[0], h_len)
+            match_count = _count_byte(h_ptr, n_ptr[unsafe_offset=0], h_len)
         else:
             match_count = _count_multi_byte(h_ptr, n_ptr, h_len, n_len)
 
@@ -280,36 +288,37 @@ fn search_all_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var byte_len = UInt(match_count * 4) if match_count > 0 else UInt(0)
         var ab = JsArrayBuffer.create(b, env, byte_len)
         if match_count > 0:
-            var ab_ptr = ab.data_ptr(b, env).bitcast[UInt32]()
+            var ab_ptr = ab.data_ptr(b, env).unsafe_bitcast[UInt32]()
             if n_len == 1:
-                _ = _collect_byte_positions(h_ptr, n_ptr[0], h_len, ab_ptr)
+                _ = _collect_byte_positions(h_ptr, n_ptr[unsafe_offset=0], h_len, ab_ptr)
             else:
                 _ = _collect_multi_byte(h_ptr, n_ptr, h_len, n_len, ab_ptr)
 
         return JsTypedArray.create_uint32(b, env, ab.value, 0, UInt(match_count)).value
     except:
         throw_js_error(env, "searchAll failed")
-        return NapiValue()
+        return NapiValue(unsafe_from_address=Int(0))
 
 
 # --- Module entry point -------------------------------------------------------
 
-@export("napi_register_module_v1", ABI="C")
-fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
+@export("napi_register_module_v1")
+def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     try:
         init_async_runtime()
     except:
         pass
 
-    var bindings_ptr = alloc[NapiBindings](1)
+    var bindings_ptr = unsafe_alloc[NapiBindings](1)
     try:
         var bindings = NapiBindings()
         init_bindings(bindings)
-        bindings_ptr.init_pointee_move(bindings^)
+        bindings_ptr.unsafe_write(bindings^)
     except:
-        bindings_ptr.free()
+        bindings_ptr.unsafe_free()
+        throw_js_error(env, "simd-search: failed to resolve N-API symbols")
         return exports
-    var cb_data = bindings_ptr.bitcast[NoneType]()
+    var cb_data = bindings_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin()
 
     var cb_ref = count_byte_fn
     var cl_ref = count_lines_fn
@@ -322,6 +331,6 @@ fn register_module(env: NapiEnv, exports: NapiValue) -> NapiValue:
         m.method("searchAll", fn_ptr(sa_ref))
         m.flush()
     except:
-        pass
+        throw_js_error(env, "simd-search: failed to register exports")
 
     return exports
