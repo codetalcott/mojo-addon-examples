@@ -31,7 +31,7 @@ fi
 GPU_ACCEL=""
 if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
     GPU_ACCEL="--target-accelerator metal:4"
-elif [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
+elif [ "$(uname -s)" = "Linux" ]; then
     GPU_ACCEL="--target-accelerator sm_80"
 fi
 

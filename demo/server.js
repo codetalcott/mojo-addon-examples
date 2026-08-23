@@ -13,11 +13,11 @@ const PORT = process.env.PORT || 8080;
 
 // --- Load addons -----------------------------------------------------------
 
-const imageAddon = require('../image/build/image.node');
-const statsAddon = require('../stats/build/stats.node');
-const searchAddon = require('../simd-search/build/search.node');
-const matmulAddon = require('../matmul/build/matmul.node');
-const hashAddon = require('../wyhash/build/wyhash.node');
+const imageAddon = require('../examples/image/build/image.node');
+const statsAddon = require('../examples/stats/build/stats.node');
+const searchAddon = require('../examples/simd-search/build/search.node');
+const matmulAddon = require('../examples/matmul/build/matmul.node');
+const hashAddon = require('../examples/wyhash/build/wyhash.node');
 
 // --- Static files -----------------------------------------------------------
 

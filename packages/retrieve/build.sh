@@ -24,7 +24,7 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
     MCPU_FLAG="--mcpu haswell"
 fi
 
-# GPU target: Darwin arm64 → metal:4, Linux x86_64 → sm_80 (NVIDIA baseline;
+# GPU target: Darwin arm64 → metal:4, Linux → sm_80 (NVIDIA baseline;
 # PTX forward-compat covers sm_80/86/89/90/100+ via driver JIT — one binary
 # ships to all NVIDIA users). Override with QKSTAT_RETRIEVE_ACCEL="--target-accelerator sm_90"
 # for a native sm_90 build (Hopper-specific wgmma/TMA — future optimization).
@@ -32,7 +32,7 @@ ACCEL_FLAG="${QKSTAT_RETRIEVE_ACCEL-}"
 if [ -z "${QKSTAT_RETRIEVE_ACCEL+x}" ]; then
     if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         ACCEL_FLAG="--target-accelerator metal:4"
-    elif [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
+    elif [ "$(uname -s)" = "Linux" ]; then
         ACCEL_FLAG="--target-accelerator sm_80"
     fi
 fi

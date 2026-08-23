@@ -20,13 +20,17 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
 fi
 
 # GPU target: Mojo needs --target-accelerator for heterogeneous compilation.
-# Darwin arm64 → metal:4, Linux x86_64 → sm_90 (H100/H200).
+# Darwin arm64 → metal:4, Linux → sm_90 (H100/H200; also GH200, which is
+# aarch64 + Hopper). The Linux branch is NOT gated on x86_64: the flag names the
+# NVIDIA target, not the host CPU, and without it Mojo falls back to host
+# detection and dies with "Unknown GPU architecture detected" wherever no GPU is
+# present — which is exactly what a linux-aarch64 container build hits.
 # Override with IMAGE_ACCEL="" or IMAGE_ACCEL="--target-accelerator sm_80" etc.
 ACCEL_FLAG="${IMAGE_ACCEL-}"
 if [ -z "${IMAGE_ACCEL+x}" ]; then
     if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         ACCEL_FLAG="--target-accelerator metal:4"
-    elif [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
+    elif [ "$(uname -s)" = "Linux" ]; then
         ACCEL_FLAG="--target-accelerator sm_90"
     fi
 fi

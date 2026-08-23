@@ -1,0 +1,24 @@
+# Without this file the build context is ~1.4 GB — .pixi alone is 940 MB and
+# node_modules another 420 MB — all of it re-sent to the daemon on every build
+# and all of it reinstalled inside the image anyway.
+.pixi/
+node_modules/
+**/node_modules/
+
+# Build outputs: the builder stage compiles its own. Copying host artifacts in
+# would ship Darwin .node files into a Linux image.
+**/build/*.node
+**/build/*.dylib
+**/build/*.so
+
+.git/
+.github/
+.DS_Store
+**/.DS_Store
+
+# Regenerable or environment-specific
+packages/embed/fixtures/
+examples/rag-demo/fixtures/
+docs/
+*.md
+!README.md
