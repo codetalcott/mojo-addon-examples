@@ -22,14 +22,20 @@ fi
 # GPU target: Mojo needs --target-accelerator for heterogeneous compilation.
 # Defaults:
 #   Darwin arm64  → metal:4  (covers M1-M4)
-#   Linux x86_64  → sm_90    (NVIDIA Hopper — H100/H200; override for other NVIDIA via STATS_ACCEL)
-# Override with STATS_ACCEL="" to build CPU-only, or with a specific flag like
-# STATS_ACCEL="--target-accelerator sm_80" for A100, "sm_100a" for B100/B200, etc.
+#   Linux         → sm_90    (NVIDIA Hopper — H100/H200, and GH200, which is
+#                             aarch64 + Hopper). Not gated on x86_64: the flag names
+#                             the NVIDIA target, not the host CPU. Without it Mojo
+#                             falls back to host detection and dies with "Unknown GPU
+#                             architecture detected" wherever no GPU is present.
+# Override with a specific flag like STATS_ACCEL="--target-accelerator sm_80" for
+# A100, "sm_100a" for B100/B200, etc. Note STATS_ACCEL="" does NOT give a CPU-only
+# build — it only drops the flag, and Mojo then falls back to the *host* accelerator.
+# There is no "no accelerator" flag; see CLAUDE.md "GPU target flags".
 ACCEL_FLAG="${STATS_ACCEL-}"
 if [ -z "${STATS_ACCEL+x}" ]; then
     if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         ACCEL_FLAG="--target-accelerator metal:4"
-    elif [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
+    elif [ "$(uname -s)" = "Linux" ]; then
         ACCEL_FLAG="--target-accelerator sm_90"
     fi
 fi

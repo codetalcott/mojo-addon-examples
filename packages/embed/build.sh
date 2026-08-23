@@ -21,11 +21,13 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
     MCPU_FLAG="--mcpu haswell"
 fi
 
+# The Linux branch is not gated on x86_64: the flag names the NVIDIA target, not
+# the host CPU, and without it Mojo falls back to host detection.
 ACCEL_FLAG="${EMBED_ACCEL-}"
 if [ -z "${EMBED_ACCEL+x}" ]; then
     if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         ACCEL_FLAG="--target-accelerator metal:4"
-    elif [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then
+    elif [ "$(uname -s)" = "Linux" ]; then
         ACCEL_FLAG="--target-accelerator sm_80"
     fi
 fi

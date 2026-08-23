@@ -250,7 +250,7 @@ def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
     # Cache a DeviceContext if a GPU is available.
     try:
         var ctx = DeviceContext()
-        set_instance_data(bindings_ptr.as_unsafe_any_origin(), env, GpuState(ctx^))
+        set_instance_data(bindings_ptr, env, GpuState(ctx^))
     except:
         pass
 

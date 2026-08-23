@@ -508,7 +508,7 @@ def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
             OpaquePointer[MutAnyOrigin]
         ]()[]
         _ = raw_set_instance_data(
-            bindings_ptr.as_unsafe_any_origin(),
+            bindings_ptr,
             env,
             state_ptr.unsafe_bitcast[NoneType]().as_unsafe_any_origin(),
             fin_ptr,

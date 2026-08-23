@@ -30,7 +30,7 @@ def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
 
     try:
         var m = ModuleBuilder(env, exports, cb_data)
-        register_gpu_linalg(m, bindings_ptr.as_unsafe_any_origin())
+        register_gpu_linalg(m, bindings_ptr)
         m.flush()
     except:
         # Leaves a pending JS error so require() throws with a real message.

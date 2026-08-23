@@ -517,7 +517,7 @@ def register_module(env: NapiEnv, exports: NapiValue) abi("C") -> NapiValue:
 
     try:
         var ctx = DeviceContext()
-        set_instance_data(bindings_ptr.as_unsafe_any_origin(), env, GpuState(ctx^))
+        set_instance_data(bindings_ptr, env, GpuState(ctx^))
     except:
         pass
 
