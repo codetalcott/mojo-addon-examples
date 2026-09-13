@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates git build-essential patchelf && \
     rm -rf /var/lib/apt/lists/*
 
-# Node 22: napi-mojo 0.13 resolves N-API symbols at load time that Node 20 does
+# Node 22: napi-mojo (0.13 and later) resolves N-API symbols at load time that Node 20 does
 # not export, so require() throws there. Matches engines.node in package.json.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs
