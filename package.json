@@ -38,7 +38,7 @@
     "@qkstat/embed": "file:packages/embed",
     "@qkstat/retrieve": "file:packages/retrieve",
     "hnswlib-node": "^3.0.0",
-    "napi-mojo": "^0.14.0",
+    "napi-mojo": "^0.15.0",
     "onnxruntime-node": "^1.24.3"
   },
   "overrides": {

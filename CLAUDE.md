@@ -173,7 +173,7 @@ The repo root's `pixi.toml` includes `transformers`, `safetensors`, etc. specifi
 
 ## Notable constraints
 
-- **Mojo version pin** lives in `pixi.toml`. As of 2026-08-12 this is **stable Mojo 1.0.0** (`max = "==26.5.0"`, from the stable `https://conda.modular.com/max/` channel) rather than a nightly, matching napi-mojo 0.14.0 (which still pins `max = "==26.5.0"`), which pins stable releases for exactly the reason below. `scripts/update-mojo-version.sh` rewrites only the version line, so repoint `channels` too if you ever move back to nightlies.
+- **Mojo version pin** lives in `pixi.toml`. As of 2026-08-12 this is **stable Mojo 1.0.0** (`max = "==26.5.0"`, from the stable `https://conda.modular.com/max/` channel) rather than a nightly, matching napi-mojo 0.15.0 (which still pins `max = "==26.5.0"`), which pins stable releases for exactly the reason below. `scripts/update-mojo-version.sh` rewrites only the version line, so repoint `channels` too if you ever move back to nightlies.
   The pin must track whatever Mojo version the installed napi-mojo was migrated to — the framework ships Mojo *source*, so a mismatch surfaces as compile errors inside `node_modules/napi-mojo/src`, not in this repo's code. Tracking a stable release on both sides is what makes that coupling manageable.
 - **A `.node` is not self-contained, so containers need bundling.** It carries hard
   `@rpath`/RUNPATH deps on the Mojo runtime (`libKGENCompilerRTShared`,
