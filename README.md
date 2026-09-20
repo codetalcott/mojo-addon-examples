@@ -8,7 +8,7 @@ High-performance Node.js addon examples built with [napi-mojo](https://github.co
 - [`packages/retrieve/`](packages/retrieve/) — `@qkstat/retrieve`, GPU exact-retrieval primitives (matmul + per-row top-k). 0.06 ms top-10 at recall 1.0 on MS-MARCO 10k (H100). Pre-release.
 - [`packages/embed/`](packages/embed/) — `@qkstat/embed`, MiniLM-L6-v2 embeddings on H100 via MAX + Python interop. Composes with `packages/retrieve` in one Node.js process. 1.36 ms p50 embed+search on 1k corpus. Pre-release.
 - [`spikes/mojo-runtime/`](spikes/mojo-runtime/) + [`docs/mojo-runtime-isolation-spike-findings.md`](docs/mojo-runtime-isolation-spike-findings.md) — Tiered-imports experiment isolating which Mojo runtime libraries a binary links against (five tiers, `ldd` captures).
-- [`scripts/`](scripts/) + [`docs/cloud-benchmark-runbook.md`](docs/cloud-benchmark-runbook.md) — RunPod orchestration for reproducing H100 benchmarks (~$1, ~30 min per run).
+- [`scripts/`](scripts/) + [`docs/cloud-benchmark-runbook.md`](docs/cloud-benchmark-runbook.md) — RunPod orchestration for reproducing H100 benchmarks (~$2, ~25–35 min per run, cold).
 
 ## Examples
 
@@ -149,7 +149,7 @@ AVX-512 byte scanning on Xeon Sapphire Rapids is brutal for this workload — 89
 2. **Batched N-API API.** Process N inputs per call with async copy-compute overlap so the GPU is never idle waiting for PCIe.
 3. **Higher arithmetic intensity.** Matmul (O(n³) compute on O(n²) data), convolution, attention — anything where the compute cost dominates the transfer cost. Stats, grayscale, and countByte are all ≤1 op per byte, the worst possible ratio for any GPU on a PCIe link.
 
-All three are Phase 3 candidate work. See [docs/cloud-benchmark-runbook.md](docs/cloud-benchmark-runbook.md) to reproduce these numbers (~$1, ~30 minutes on RunPod), and the per-addon READMEs for deeper teardowns.
+All three are Phase 3 candidate work. See [docs/cloud-benchmark-runbook.md](docs/cloud-benchmark-runbook.md) to reproduce these numbers (~$2, ~25–35 minutes on RunPod — see the cost note under [Reproducing on RunPod](#reproducing-on-runpod)), and the per-addon READMEs for deeper teardowns.
 
 ## Phase 3a Cloud Benchmark Results — persistent buffers flipped the result
 
@@ -317,9 +317,20 @@ See [`docs/embedding-kernel-spike-findings.md`](docs/embedding-kernel-spike-find
 
 Scripts supporting H100 cloud benchmark runs live in [`scripts/`](scripts/):
 
-- [`scripts/runpod-launch.sh`](scripts/runpod-launch.sh) — one-shot RunPod launcher with `trap EXIT` termination safety net. Launches a pod, SSHes in, runs your command, captures output, terminates. Works with a persistent Network Volume to cache pixi env + model weights.
+- [`scripts/runpod-launch.sh`](scripts/runpod-launch.sh) — one-shot RunPod launcher with `trap EXIT` termination safety net, backed by a RunPod-side `terminateAfter`. Launches a pod, SSHes in, runs your command, captures output, terminates.
+
+#### Reproducing on RunPod
+
+The launcher supports a persistent Network Volume to cache the pixi env and model weights, which is what the original "~30 s warm start, ~$1 per run" figures assumed. **There is no such volume on this account today**, so use the self-contained cold bootstrap:
+
+```bash
+bash scripts/runpod-launch.sh --no-volume --capture-to docs/<name>.txt -- \
+  "npm install --no-audit --no-fund && bash scripts/verify-all.sh --with-embed-test"
+```
+
+`npm install` is required in the command: the cold bootstrap installs the toolchains but never runs it. Budget **~$2 and 25–35 min** — nothing caches between runs, so each session re-downloads the MAX toolchain and model weights. Recreating and reseeding a volume restores the cheaper warm path.
 - [`scripts/lambda-bench.sh`](scripts/lambda-bench.sh) — Lambda Cloud sibling for the same orchestration. Unused today (capacity issues during the Phase 3d/spike work); kept as fallback.
-- [`scripts/bootstrap.sh`](scripts/bootstrap.sh) — canonical pod-side session bootstrap (PATH + auth + `git fetch` + repo sync). Copied onto the Network Volume so each pod session starts from a known state in ~30 s.
+- [`scripts/bootstrap.sh`](scripts/bootstrap.sh) — canonical pod-side session bootstrap (PATH + auth + `git fetch` + repo sync), so each pod session starts from a known state. With a Network Volume it is seeded there and resumes in ~30 s; under `--no-volume` it installs the toolchains from scratch, which is most of the cold-run budget above.
 - [`scripts/runpod-bench-3{b,c,d}.sh`](scripts/) — on-pod bench runners for each phase.
 
 Phase 3d and the spike established the pattern. Total cloud spend across all phase 3 work + spike: under $20.

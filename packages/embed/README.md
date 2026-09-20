@@ -16,7 +16,7 @@ npm install @qkstat/embed
 
 Platform prebuilts (not yet published):
 
-- `@qkstat/embed-darwin-arm64` — Apple Silicon (MAX currently falls back to CPU on M4; GPU paths ship when MAX adds Metal backend)
+- `@qkstat/embed-darwin-arm64` — Apple Silicon (**no useful GPU path yet** — see [Apple Silicon](#apple-silicon))
 - `@qkstat/embed-linux-x64` — Linux x86_64 (NVIDIA sm_80+; single binary covers H100/H200 via driver PTX JIT)
 
 Until prebuilts ship, build from source from the monorepo:
@@ -99,8 +99,32 @@ Cold start: ~29.6 s on first `embed()` call (MAX graph compile + CUDA JIT); subs
 ## Requirements
 
 - **Node.js ≥ 22.12** (N-API v10)
-- **NVIDIA driver ≥ 580** OR macOS 14+ with Apple Silicon (currently CPU fallback on M4)
+- **NVIDIA driver ≥ 580** for the GPU path. Apple Silicon runs, but at CPU-class speed — see [Apple Silicon](#apple-silicon)
 - Model weights auto-downloaded via HuggingFace on first run (cached to `HF_HOME`)
+
+## Apple Silicon
+
+The package runs on an M-series Mac and is numerically correct there (cosine 1.000000 vs the CPU reference), but **you should not expect acceleration.**
+
+As of MAX 26.6.0 `driver.Accelerator()` succeeds on an M4 and reports `Device(type=gpu,id=0)` — earlier releases raised "Not implemented for device: Apple M4" and the library fell back to CPU. That is a change of mechanism, not of capability. Measured on an M4, n=6 after warmup:
+
+| batch | `gpu` device | `cpu` device | speedup |
+| --- | --- | --- | --- |
+| 32×32 | 20.1 ms | 22.9 ms | 1.14× |
+| 64×64 | 87.7 ms | 91.4 ms | 1.04× |
+| 256×128 | 862 ms | 626 ms | **0.73×** |
+
+At a realistic batch the `gpu` device is *slower* than CPU, and latency scales linearly with batch — CPU-like. Use Apple Silicon for correctness work and local iteration; benchmark and deploy on NVIDIA.
+
+### `EMBED_REQUIRE_GPU`
+
+The library falls back to `driver.CPU()` when `Accelerator()` fails, which keeps it usable on hosts with no accelerator but means a GPU regression can pass a test suite unnoticed. Set `EMBED_REQUIRE_GPU=1` to make that fallback a hard error instead:
+
+```bash
+EMBED_REQUIRE_GPU=1 node your-script.js
+```
+
+The repo's `scripts/verify-all.sh` defaults it to `1` for its own runs on every platform; `EMBED_REQUIRE_GPU=0` opts back out. Note that on Apple Silicon this only proves the device initialized — given the numbers above, it is not evidence of acceleration.
 
 ## License
 
