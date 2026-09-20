@@ -104,17 +104,26 @@ Cold start: ~29.6 s on first `embed()` call (MAX graph compile + CUDA JIT); subs
 
 ## Apple Silicon
 
-The package runs on an M-series Mac and is numerically correct there (cosine 1.000000 vs the CPU reference), but **you should not expect acceleration.**
+The package runs on an M-series Mac and is numerically correct there (cosine 1.000000 vs the CPU reference). As of MAX 26.6.0 `driver.Accelerator()` succeeds on an M4 and reports `Device(type=gpu,id=0)`; earlier releases raised "Not implemented for device: Apple M4" and fell back to CPU.
 
-As of MAX 26.6.0 `driver.Accelerator()` succeeds on an M4 and reports `Device(type=gpu,id=0)` — earlier releases raised "Not implemented for device: Apple M4" and the library fell back to CPU. That is a change of mechanism, not of capability. Measured on an M4, n=6 after warmup:
+**The `gpu` device is the right default on Apple Silicon, but the margin is small and depends on sequence length.** Measured on an M4, `execute` + explicit `synchronize()`, n=8 after warmup:
 
-| batch | `gpu` device | `cpu` device | speedup |
-| --- | --- | --- | --- |
-| 32×32 | 20.1 ms | 22.9 ms | 1.14× |
-| 64×64 | 87.7 ms | 91.4 ms | 1.04× |
-| 256×128 | 862 ms | 626 ms | **0.73×** |
+| shape (batch × seq) | tokens | `gpu` | `cpu` | winner |
+| --- | --- | --- | --- | --- |
+| 1×14 | 14 | 5.02 ms | 3.27 ms | CPU 1.54× |
+| 8×14 | 112 | 5.37 ms | 5.61 ms | GPU 1.04× |
+| **100×14** | **1 400** | **25.75 ms** | **30.74 ms** | **GPU 1.19×** |
+| 32×32 | 1 024 | 19.57 ms | 25.54 ms | GPU 1.30× |
+| 100×32 | 3 200 | 56.69 ms | 61.85 ms | GPU 1.09× |
+| 64×64 | 4 096 | 83.05 ms | 91.61 ms | GPU 1.10× |
+| 128×64 | 8 192 | 163.05 ms | 170.36 ms | GPU 1.04× |
+| 256×128 | 32 768 | 836.15 ms | 722.02 ms | CPU 1.16× |
 
-At a realistic batch the `gpu` device is *slower* than CPU, and latency scales linearly with batch — CPU-like. Use Apple Silicon for correctness work and local iteration; benchmark and deploy on NVIDIA.
+The GPU leads across the usual range and loses at the two extremes: single short inputs, where dispatch overhead dominates, and long sequences, where O(S²) attention scales worse on this backend. The crossover tracks **sequence length, not batch size** — chunking a 256×128 batch into smaller batches at the same seq_len does not recover the win. MiniLM-L6 is a short-sequence model, so normal use sits in the GPU-favouring region.
+
+Treat this as parity-class either way. It is not H100 acceleration — see [Benchmarks](#benchmarks) — so benchmark and deploy on NVIDIA; Apple Silicon is for correctness work and local iteration.
+
+Things that do *not* help on M4, all measured rather than assumed: **fp16** (961.7 ms vs 912.7 ms at 256×128 — 0.95×, no gain, so arithmetic throughput is not the constraint), **batch chunking** (above), and **zero-copy transfer** — the D2H is already 0.4–0.8 ms via DLPack against ~900 ms of compute, so the "Phase 2 zero-copy" note in `embed.py` has nothing to win here. If that optimization is worth doing, the case has to come from H100 and real PCIe.
 
 ### `EMBED_REQUIRE_GPU`
 
@@ -124,7 +133,7 @@ The library falls back to `driver.CPU()` when `Accelerator()` fails, which keeps
 EMBED_REQUIRE_GPU=1 node your-script.js
 ```
 
-The repo's `scripts/verify-all.sh` defaults it to `1` for its own runs on every platform; `EMBED_REQUIRE_GPU=0` opts back out. Note that on Apple Silicon this only proves the device initialized — given the numbers above, it is not evidence of acceleration.
+The repo's `scripts/verify-all.sh` defaults it to `1` for its own runs on every platform; `EMBED_REQUIRE_GPU=0` opts back out. On Apple Silicon this proves the device initialized and, per the numbers above, that you are on the faster of the two paths at typical shapes — but the margin is small, so do not read it as evidence of GPU-class speedup.
 
 ## License
 
