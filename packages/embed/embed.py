@@ -52,6 +52,29 @@ def _pick_device(kind: str = "gpu") -> driver.Device:
         try:
             return driver.Accelerator()
         except Exception as e:
+            # A silent CPU fallback is how a GPU regression passes every gate
+            # we have. The roundtrip still clears its cosine threshold on CPU
+            # and the demo still runs, so the suite goes green while this
+            # package's entire premise — MiniLM on an H100 — is broken. That
+            # is not hypothetical: a full H100 verification of the Mojo 1.1.0
+            # migration reported "PASS test packages/embed" without anything
+            # proving a GPU was involved, because verify-all.sh prints only
+            # PASS and swallows this warning.
+            #
+            # EMBED_REQUIRE_GPU turns the fallback into a hard failure.
+            # It is opt-in rather than the default so that a host with no
+            # accelerator at all can still run this as a pure correctness
+            # check. verify-all.sh sets it whenever nvidia-smi is present,
+            # which is the population that must never silently degrade.
+            # (As of MAX 26.6.0 Accelerator() also succeeds on Apple silicon
+            # — it returns Device(type=gpu,id=0) — so the old "M4 is CPU-only"
+            # rule no longer holds and Darwin can opt in by hand.)
+            if os.environ.get("EMBED_REQUIRE_GPU", "") not in ("", "0"):
+                raise RuntimeError(
+                    f"EMBED_REQUIRE_GPU is set, but Accelerator() failed: {e}. "
+                    f"Refusing to fall back to CPU — on a GPU host that is a "
+                    f"regression, not a degraded mode."
+                ) from e
             log.warning(f"Accelerator failed ({e}); falling back to CPU")
     return driver.CPU()
 
