@@ -79,6 +79,21 @@ skip() { RESULTS+=("SKIP  $1"); printf '::: %s\n    SKIP (%s)\n' "$1" "$2"; }
 echo "############ preflight ############"
 uname -sm
 
+# packages/embed silently falls back to CPU when Accelerator() fails, which
+# makes a GPU regression indistinguishable from success (see _pick_device in
+# packages/embed/embed.py). On a host that HAS an NVIDIA GPU there is no
+# legitimate reason to run embed on the CPU, so forbid it rather than trusting
+# the reader to notice. Left unset elsewhere so a host with no accelerator can
+# still run the correctness check. NB as of MAX 26.6.0 Apple silicon DOES get a
+# working Accelerator(), so Darwin is no longer inherently CPU-only here — pass
+# EMBED_REQUIRE_GPU=1 by hand to hold it to the same standard.
+if command -v nvidia-smi >/dev/null 2>&1; then
+  export EMBED_REQUIRE_GPU=1
+  echo "embed GPU: required (nvidia-smi present — CPU fallback is a failure)"
+else
+  echo "embed GPU: not required (no nvidia-smi — CPU fallback allowed)"
+fi
+
 # Darwin needs Xcode's Metal Toolchain to build ANY addon containing GPU
 # kernels. Sources with GPU code emit metallib regardless of
 # --target-accelerator, so the *_ACCEL vars cannot opt out of this. Without the
@@ -185,8 +200,11 @@ elif [ "$WITH_EMBED_TEST" -eq 1 ]; then
   # kernel-factory thesis goes unverified.
   step "demo packages/embed" pixi run node packages/embed/demo.js
 else
-  # Downloads MiniLM weights and needs a working Accelerator(); on Apple silicon
-  # MAX reports "Not implemented for device: Apple M4", so this is opt-in.
+  # Downloads MiniLM weights, so this is opt-in. Note it does NOT by itself
+  # require a working Accelerator(): embed.py falls back to CPU, so on a host
+  # without one this proves correctness only, never that a GPU ran.
+  # EMBED_REQUIRE_GPU (set above on nvidia-smi hosts) is what makes it prove
+  # the GPU path.
   skip "test packages/embed" "opt in with --with-embed-test"
   skip "demo packages/embed" "opt in with --with-embed-test"
 fi

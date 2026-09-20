@@ -25,7 +25,6 @@ docs/runpod-dlpack-*.txt
 docs/runpod-embed-day*.txt
 docs/lambda-bench-*.txt
 docs/bench-*.txt
-pixi.lock
 
 .vscode/
 
