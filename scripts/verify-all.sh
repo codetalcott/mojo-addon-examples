@@ -81,17 +81,26 @@ uname -sm
 
 # packages/embed silently falls back to CPU when Accelerator() fails, which
 # makes a GPU regression indistinguishable from success (see _pick_device in
-# packages/embed/embed.py). On a host that HAS an NVIDIA GPU there is no
-# legitimate reason to run embed on the CPU, so forbid it rather than trusting
-# the reader to notice. Left unset elsewhere so a host with no accelerator can
-# still run the correctness check. NB as of MAX 26.6.0 Apple silicon DOES get a
-# working Accelerator(), so Darwin is no longer inherently CPU-only here — pass
-# EMBED_REQUIRE_GPU=1 by hand to hold it to the same standard.
-if command -v nvidia-smi >/dev/null 2>&1; then
-  export EMBED_REQUIRE_GPU=1
-  echo "embed GPU: required (nvidia-smi present — CPU fallback is a failure)"
+# packages/embed/embed.py). Require a GPU by DEFAULT: the only things that run
+# --with-embed-test are a developer machine and a pod, and both have an
+# accelerator, so a CPU fallback there is a regression rather than a degraded
+# mode. Opt out deliberately with EMBED_REQUIRE_GPU=0.
+#
+# This deliberately does NOT sniff for nvidia-smi. That was the original rule
+# and it went stale within one release: MAX 26.6.0 gave Apple silicon a working
+# Accelerator() (Device(type=gpu,id=0)), so Darwin became a GPU host while the
+# gate still read it as "no GPU expected, fallback fine". Any host-detection
+# proxy has the same decay; defaulting to "required" needs no proxy at all.
+#
+# Scope: this sets the policy for THIS harness, not for the library. Running
+# packages/embed/test-roundtrip.js directly still gets embed.py's own default
+# (fallback allowed), as do other consumers like examples/semnotes. Export
+# EMBED_REQUIRE_GPU=1 yourself to hold those to the same standard.
+export EMBED_REQUIRE_GPU="${EMBED_REQUIRE_GPU:-1}"
+if [ "$EMBED_REQUIRE_GPU" = "0" ]; then
+  echo "embed GPU: not required (EMBED_REQUIRE_GPU=0 — CPU fallback allowed)"
 else
-  echo "embed GPU: not required (no nvidia-smi — CPU fallback allowed)"
+  echo "embed GPU: required (set EMBED_REQUIRE_GPU=0 to allow the CPU fallback)"
 fi
 
 # Darwin needs Xcode's Metal Toolchain to build ANY addon containing GPU
