@@ -48,7 +48,7 @@ def embed_tokens_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var b = CbArgs.get_bindings(env, info)
         # napi-mojo's CbArgs tops out at get_four; use get_argv for 5 args.
         var argv = unsafe_alloc[NapiValue](5)
-        CbArgs.get_argv(b, env, info, 5, argv.as_unsafe_any_origin())
+        _ = CbArgs.get_argv(b, env, info, 5, argv.as_unsafe_any_origin())
 
         # argv[0]: Int32Array of token IDs, shape [batch, seqLen]
         # argv[1]: Int32Array of attention mask, shape [batch, seqLen]
@@ -236,7 +236,7 @@ def embed_tokens_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
     try:
         var b = CbArgs.get_bindings(env, info)
         var argv = unsafe_alloc[NapiValue](5)
-        CbArgs.get_argv(b, env, info, 5, argv.as_unsafe_any_origin())
+        _ = CbArgs.get_argv(b, env, info, 5, argv.as_unsafe_any_origin())
 
         var ids_ta = JsTypedArray(argv[unsafe_offset=0])
         var mask_ta = JsTypedArray(argv[unsafe_offset=1])

@@ -33,7 +33,7 @@ from std.sys import simd_width_of
 from std.math import sqrt, ceildiv
 from std.memory import unsafe_memcpy, stack_allocation
 from std.memory.alloc import unsafe_alloc
-from std.gpu import thread_idx, block_idx
+from max.gpu import thread_idx, block_idx
 from max.gpu import barrier
 from std.memory import AddressSpace
 from max.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
