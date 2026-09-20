@@ -62,18 +62,20 @@ def _pick_device(kind: str = "gpu") -> driver.Device:
             # PASS and swallows this warning.
             #
             # EMBED_REQUIRE_GPU turns the fallback into a hard failure.
-            # It is opt-in rather than the default so that a host with no
-            # accelerator at all can still run this as a pure correctness
-            # check. verify-all.sh sets it whenever nvidia-smi is present,
-            # which is the population that must never silently degrade.
-            # (As of MAX 26.6.0 Accelerator() also succeeds on Apple silicon
-            # — it returns Device(type=gpu,id=0) — so the old "M4 is CPU-only"
-            # rule no longer holds and Darwin can opt in by hand.)
+            # Unset here means "allow it", so that consumers with no
+            # accelerator — examples/semnotes, ad-hoc scripts — keep working.
+            # scripts/verify-all.sh defaults it to 1 for its own runs, on every
+            # platform, because the only things that run the embed suite are a
+            # developer machine and a pod and both have an accelerator.
+            # (As of MAX 26.6.0 Accelerator() succeeds on Apple silicon too,
+            # returning Device(type=gpu,id=0), so "M4 is CPU-only" no longer
+            # holds and Darwin is held to the same standard as NVIDIA.)
             if os.environ.get("EMBED_REQUIRE_GPU", "") not in ("", "0"):
                 raise RuntimeError(
-                    f"EMBED_REQUIRE_GPU is set, but Accelerator() failed: {e}. "
-                    f"Refusing to fall back to CPU — on a GPU host that is a "
-                    f"regression, not a degraded mode."
+                    f"packages/embed requires a GPU, but Accelerator() failed: "
+                    f"{e}. Refusing to fall back to CPU — on a host that should "
+                    f"have an accelerator this is a regression, not a degraded "
+                    f"mode. Set EMBED_REQUIRE_GPU=0 to allow the CPU fallback."
                 ) from e
             log.warning(f"Accelerator failed ({e}); falling back to CPU")
     return driver.CPU()
