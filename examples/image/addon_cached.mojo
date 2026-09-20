@@ -17,7 +17,7 @@
 from std.math import ceildiv
 from std.memory import unsafe_memcpy
 from std.memory.alloc import unsafe_alloc
-from std.gpu import global_idx
+from max.gpu import global_idx
 from max.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
 
 from napi.types import NapiEnv, NapiValue

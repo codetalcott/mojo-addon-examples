@@ -37,7 +37,7 @@ def parse_matmul_args(b: Bindings, env: NapiEnv, info: NapiValue) raises -> Arra
     if argc < 6:
         raise Error("matmul requires 6 arguments: a, b, result, M, K, N")
     var argv_buf = unsafe_alloc[NapiValue](6)
-    CbArgs.get_argv(b, env, info, 6, argv_buf.as_unsafe_any_origin())
+    _ = CbArgs.get_argv(b, env, info, 6, argv_buf.as_unsafe_any_origin())
     var ta_a = JsTypedArray(argv_buf[unsafe_offset=0])
     var ta_b = JsTypedArray(argv_buf[unsafe_offset=1])
     var ta_out = JsTypedArray(argv_buf[unsafe_offset=2])
@@ -52,7 +52,7 @@ def parse_matmul_args(b: Bindings, env: NapiEnv, info: NapiValue) raises -> Arra
 
 def parse_dims(b: Bindings, env: NapiEnv, info: NapiValue) raises -> Array[Int, 3]:
     var argv_buf = unsafe_alloc[NapiValue](6)
-    CbArgs.get_argv(b, env, info, 6, argv_buf.as_unsafe_any_origin())
+    _ = CbArgs.get_argv(b, env, info, 6, argv_buf.as_unsafe_any_origin())
     var M = Int(JsInt32.from_napi_value(b, env, argv_buf[unsafe_offset=3]))
     var K = Int(JsInt32.from_napi_value(b, env, argv_buf[unsafe_offset=4]))
     var N = Int(JsInt32.from_napi_value(b, env, argv_buf[unsafe_offset=5]))
