@@ -10,6 +10,7 @@
 
 from std.memory.alloc import unsafe_alloc
 from std.python import Python, PythonObject
+from std.python._cpython import GILAcquired
 
 from napi.types import (
     NapiEnv,
@@ -41,6 +42,30 @@ def _import_embed_module() raises -> PythonObject:
     sys.path.insert(0, "/workspace/mojo-addon-examples/packages/embed")
     sys.path.insert(0, "packages/embed")
     return Python.import_module("embed")
+
+
+def _release_gil_after_init():
+    # Mojo's Python interop runs Py_Initialize on whichever thread first
+    # constructs Python(), and that thread keeps the GIL: nothing releases it.
+    # Any other thread then calls in with no thread state and segfaults (NULL
+    # tstate->interp, fault at 0x10). Call this on a JS thread before any
+    # Python work: it initializes CPython here if needed, then releases the
+    # GIL once, so every Python section below can take it with GILAcquired.
+    # Later calls, and calls from threads that never held it, are no-ops.
+    var python = Python()
+    if python.cpython().PyGILState_Check():
+        _ = python.cpython().PyEval_SaveThread()
+
+
+def _embed_batch(
+    ids_addr: Int, mask_addr: Int, dst_addr: Int, batch: Int, seq_len: Int
+) raises:
+    # Every PythonObject is created and destroyed in here, so one GILAcquired
+    # around the call covers all of the refcount traffic too.
+    var embed = _import_embed_module()
+    _ = embed.embed_batch_from_addrs(
+        ids_addr, mask_addr, dst_addr, batch, seq_len, EMBED_DIM
+    )
 
 
 def embed_tokens_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
@@ -85,10 +110,9 @@ def embed_tokens_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
         var mask_addr = Int(mask_ptr)
         var dst_addr = Int(dst_ptr)
 
-        var embed = _import_embed_module()
-        _ = embed.embed_batch_from_addrs(
-            ids_addr, mask_addr, dst_addr, batch, seq_len, EMBED_DIM
-        )
+        _release_gil_after_init()
+        with GILAcquired(Python()):
+            _embed_batch(ids_addr, mask_addr, dst_addr, batch, seq_len)
 
         return JsNumber.create(b, env, 0.0).value
     except:
@@ -104,11 +128,12 @@ def embed_tokens_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
 # AsyncWork. Runs on the libuv threadpool so the Node event loop stays
 # responsive under concurrent load.
 #
-# GIL handling: Mojo's Python interop acquires the GIL implicitly via
-# CPython's thread-state machinery, so calls from a threadpool worker
-# serialize naturally. The MAX InferenceSession inside embed.py is a
-# module-level singleton — first call pays the 30s cold-start regardless
-# of sync/async; subsequent calls reuse it.
+# GIL handling: Mojo's Python interop does NOT manage the GIL. The submit
+# callback runs _release_gil_after_init() on the JS thread, and the worker
+# takes the GIL with GILAcquired for the duration of the Python call, so
+# concurrent calls serialize on it. The MAX InferenceSession inside embed.py
+# is a module-level singleton — first call pays the cold-start regardless of
+# sync/async; subsequent calls reuse it.
 #
 # Pinning: the three TypedArrays (ids, mask, dst) are pinned via JsRef
 # at submit time and unrefed in the complete callback. The raw addresses
@@ -182,15 +207,14 @@ struct EmbedAsyncData(Movable):
 def embed_async_execute(env: NapiEnv, data: OpaquePointer[MutAnyOrigin]):
     var ptr = data.unsafe_bitcast[EmbedAsyncData]()
     try:
-        var embed = _import_embed_module()
-        _ = embed.embed_batch_from_addrs(
-            ptr[].ids_addr,
-            ptr[].mask_addr,
-            ptr[].dst_addr,
-            ptr[].batch,
-            ptr[].seq_len,
-            EMBED_DIM,
-        )
+        with GILAcquired(Python()):
+            _embed_batch(
+                ptr[].ids_addr,
+                ptr[].mask_addr,
+                ptr[].dst_addr,
+                ptr[].batch,
+                ptr[].seq_len,
+            )
     except:
         ptr[].had_error = True
 
@@ -281,6 +305,10 @@ def embed_tokens_async_fn(env: NapiEnv, info: NapiValue) -> NapiValue:
                 seq_len,
             )
         )
+
+        # Before queueing: the worker must find CPython initialized and the
+        # GIL free, or it crashes (or, once it uses GILAcquired, deadlocks).
+        _release_gil_after_init()
 
         var exec_ref = embed_async_execute
         var comp_ref = embed_async_complete

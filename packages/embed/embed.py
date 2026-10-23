@@ -23,6 +23,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -196,15 +197,23 @@ class EmbeddingEngine:
 # --- Singleton + Mojo-facing entrypoint ------------------------------------
 
 _ENGINE_SINGLETON: EmbeddingEngine | None = None
+_ENGINE_LOCK = threading.Lock()
 
 
 def get_engine(device: str = "gpu") -> EmbeddingEngine:
     """Lazy singleton. First call pays the model download + compile cost;
     subsequent calls return the cached instance. Mojo reuses this across
-    N-API invocations for the duration of the Node process."""
+    N-API invocations for the duration of the Node process.
+
+    The lock is load-bearing: embedTokensAsync calls arrive on several libuv
+    threads, and construction releases the GIL (download, compile), so
+    concurrent first calls would each build an engine. Building several at
+    once was seen to corrupt the heap and abort the process."""
     global _ENGINE_SINGLETON
     if _ENGINE_SINGLETON is None:
-        _ENGINE_SINGLETON = EmbeddingEngine(device=device)
+        with _ENGINE_LOCK:
+            if _ENGINE_SINGLETON is None:
+                _ENGINE_SINGLETON = EmbeddingEngine(device=device)
     return _ENGINE_SINGLETON
 
 

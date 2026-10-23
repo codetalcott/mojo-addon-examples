@@ -3,10 +3,12 @@
 // Exercises the embed→GpuIndex orchestration: warmup idempotence, addTexts
 // rebuild, search lifecycle, batched search, close-then-search rejection.
 // Uses a deterministic bag-of-words mock engine by default so the test runs
-// anywhere (M4 cannot run the real MAX graph; that path is covered by
-// packages/embed/demo.js + bench.js on RunPod H100).
+// anywhere, without MAX or model weights.
 //
-// Set EMBED_REAL=1 to swap in the real EmbeddingEngine (RunPod only).
+// Set EMBED_REAL=1 to swap in the real EmbeddingEngine (MAX + MiniLM weights;
+// runs on M4 and H100). Every embed RagPipeline makes goes through
+// embedTokensAsync, so that mode is also the async path's integration test;
+// scripts/verify-all.sh --with-embed-test runs it.
 //
 // Run: pixi run node packages/embed/test-pipeline.js
 

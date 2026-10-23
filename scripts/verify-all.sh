@@ -208,6 +208,13 @@ elif [ "$WITH_EMBED_TEST" -eq 1 ]; then
   # contexts. test-roundtrip.js exercises embed alone, so without this the
   # kernel-factory thesis goes unverified.
   step "demo packages/embed" pixi run node packages/embed/demo.js
+  # Neither step above calls embedTokensAsync, which is how the async path
+  # went untested from 2026-04 to 2026-10 while segfaulting on its second call
+  # (see test-async.js). These two run it: the first for thread safety, the
+  # second as RagPipeline's real-engine integration test, where every embed
+  # is async.
+  step "test packages/embed async" pixi run node packages/embed/test-async.js
+  step "test packages/embed pipeline" env EMBED_REAL=1 pixi run node packages/embed/test-pipeline.js
 else
   # Downloads MiniLM weights, so this is opt-in. Note it does NOT by itself
   # require a working Accelerator(): embed.py falls back to CPU, so on a host
@@ -216,6 +223,8 @@ else
   # the GPU path.
   skip "test packages/embed" "opt in with --with-embed-test"
   skip "demo packages/embed" "opt in with --with-embed-test"
+  skip "test packages/embed async" "opt in with --with-embed-test"
+  skip "test packages/embed pipeline" "opt in with --with-embed-test"
 fi
 
 echo
