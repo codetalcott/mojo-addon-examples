@@ -51,6 +51,7 @@ npm run build:retrieve                        # = bash packages/retrieve/build.s
 # packages/embed — built separately; depends on packages/retrieve being built first
 npm run build:retrieve && npm run build:embed
 pixi run node packages/embed/test-roundtrip.js   # Gate F4 correctness
+pixi run node packages/embed/test-async.js       # GIL / thread safety of the async path
 pixi run node packages/embed/demo.js             # GPU end-to-end with packages/retrieve
 pixi run node packages/embed/bench.js            # MS-MARCO warm-path benchmarks
 
@@ -166,6 +167,8 @@ When adding a new GPU kernel, prefer the cached pattern if the input is large an
 ### `packages/embed` specifics
 
 Composition model: `packages/embed/build/embed.node` (MAX Python interop for MiniLM) and `packages/retrieve/build/retrieve.node` (Mojo N-API matmul) load into the **same Node process** with **separate CUDA contexts**. This is the "kernel-factory" thesis the spike validated. The `embed_batch_from_addrs` path in `packages/embed/embed.py` is a raw-address memmove; DLPack zero-copy is a deferred optimization. [`docs/embedding-kernel-spike-findings.md`](docs/embedding-kernel-spike-findings.md) is the day-by-day execution log from the original spike (archived after productization).
+
+**Every Python call in `embed.mojo` must hold the GIL, and Mojo's Python interop does not manage it.** CPython is initialized by `Py_Initialize` on the first thread that touches it, and that thread keeps the GIL. `embed.mojo` therefore releases it once on the JS thread (`_release_gil_after_init`) and wraps every Python section, sync and async, in `GILAcquired`. A Python call added outside that wrapper segfaults as soon as a second thread is involved (fault at `0x10`, a NULL thread state); `embedTokensAsync` did exactly that on its second call from 2026-04 to 2026-10, unnoticed because nothing ran it. The matching race in engine construction is guarded by the lock in `embed.py`'s `get_engine`. `test-async.js` is the regression test for both.
 
 The Mojo addon imports its Python module by inserting `packages/embed` into `sys.path` at runtime — handles both pod (`/workspace/mojo-addon-examples/packages/embed`) and laptop (relative `packages/embed`) paths. See [`packages/embed/src/embed.mojo`](packages/embed/src/embed.mojo) `_import_embed_module`.
 
